@@ -1,9 +1,17 @@
 import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING
+
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.analysis_job import AnalysisJob
+
 
 class Export(Base):
     __tablename__ = "exports"
@@ -14,17 +22,27 @@ class Export(Base):
         default=uuid.uuid4
     )
 
-    submission_id: Mapped[uuid.UUID] = mapped_column(
+    job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("submissions.submission_id"),
+        ForeignKey("analysis_jobs.job_id", ondelete="CASCADE"),
         nullable=False
     )
 
-    export_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    export_format: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False
+    )
 
-    file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    file_path: Mapped[str] = mapped_column(
+        Text,
+        nullable=False
+    )
 
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now()
+    )
+
+    analysis_job: Mapped["AnalysisJob"] = relationship(
+        back_populates="exports"
     )
