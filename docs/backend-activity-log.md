@@ -1,119 +1,145 @@
-# Backend Activity Log - TrustLens
+# Backend Activity Log Update - TrustLens
 
-## 1. Thông tin chung
+## Cập nhật ngày 15/06/2026
 
-| Mục             | Nội dung                                  |
-| --------------- | ----------------------------------------- |
-| Dự án           | TrustLens                                 |
-| Module          | Backend                                   |
-| Người thực hiện | Phan Tấn Sang                             |
-| Vai trò         | Backend - Server, Database, API Structure |
-| Ngày cập nhật   | 15/06/2026                                |
-| Repository      | TrustLens-Backend                         |
-| Branch          | main                                      |
-| Commit gần nhất | 701f881                                   |
+### 1. Tổng quan tiến độ hôm nay
 
----
+Trong ngày 15/06/2026, backend TrustLens đã được cập nhật từ mức **backend skeleton** sang mức **backend foundation có API upload chạy được ở bản dev/local**.
 
-## 2. Mục tiêu công việc
+Các nhóm công việc chính đã hoàn thành:
 
-Mục tiêu của giai đoạn này là chuẩn hóa lại cấu trúc backend theo hướng module hóa, phục vụ cho việc phát triển các chức năng chính của TrustLens trong các bước tiếp theo.
-
-Backend được tổ chức để hỗ trợ các nhóm chức năng chính:
-
-* RESTful API.
-* Cấu hình hệ thống.
-* Kết nối database.
-* Quản lý models.
-* Quản lý schemas request/response.
-* Service layer.
-* File processing.
-* Citation processing.
-* Metadata lookup.
-* NLP/relevance scoring.
-* Trust Score processing.
-* Background worker.
-* Utility functions.
+* Bổ sung Upload API cho submission.
+* Bổ sung Job Status API dạng mock.
+* Cấu hình CORS để backend có thể kết nối với frontend local.
+* Chuẩn hóa lại module backend theo SRS.
+* Bổ sung các thư mục và file skeleton cho export, models, schemas và services.
+* Commit các thay đổi thành 2 nhóm rõ ràng.
 
 ---
 
-## 3. Các hoạt động đã thực hiện
+## 2. Các thay đổi đã thực hiện
 
-### 3.1. Chuẩn hóa cấu trúc thư mục backend
+### 2.1. Thêm Upload API bản dev/local
 
-Đã tái cấu trúc thư mục `apps/backend/app` theo hướng rõ ràng hơn:
+Đã triển khai endpoint:
 
 ```txt
-app/
-├── api/
-├── core/
-├── db/
-├── models/
-├── schemas/
-├── services/
-├── processing/
-├── utils/
-└── workers/
+POST /api/v1/submissions/upload
 ```
 
-Ý nghĩa từng thư mục:
+API này hỗ trợ:
 
-| Thư mục       | Vai trò                                                   |
-| ------------- | --------------------------------------------------------- |
-| `api/`        | Chứa các API endpoint của hệ thống                        |
-| `core/`       | Chứa cấu hình, bảo mật, phân quyền, exception, logging    |
-| `db/`         | Chứa cấu hình kết nối database và SQLAlchemy base         |
-| `models/`     | Chứa SQLAlchemy models tương ứng với database tables      |
-| `schemas/`    | Chứa Pydantic schemas cho request/response                |
-| `services/`   | Chứa business logic của hệ thống                          |
-| `processing/` | Chứa logic xử lý file, citation, metadata, NLP và scoring |
-| `utils/`      | Chứa các hàm tiện ích dùng chung                          |
-| `workers/`    | Chứa cấu hình worker xử lý nền                            |
+* Nhận file upload dạng `multipart/form-data`.
+* Hỗ trợ file `.pdf` và `.docx`.
+* Kiểm tra extension file.
+* Kiểm tra MIME type.
+* Kiểm tra file rỗng.
+* Kiểm tra giới hạn dung lượng file.
+* Lưu file vào thư mục local `uploads/`.
+* Tạo `file_id`.
+* Tạo `submission_id`.
+* Tạo `job_id`.
+* Tạo checksum SHA-256 cho file.
+* Trả về response JSON cho frontend.
+
+Kết quả test thực tế đã upload thành công file:
+
+```txt
+Lab 1.docx
+```
+
+Thông tin trả về gồm:
+
+```txt
+submission_id
+assignment_id
+owner_label
+file_id
+original_name
+stored_name
+stored_path
+mime_type
+size_bytes
+checksum
+job_id
+status
+progress
+step
+error_code
+```
+
+Trạng thái trả về:
+
+```txt
+submission.status = UPLOADED
+job.status = QUEUED
+job.progress = 0
+job.step = queued
+```
+
+Ghi chú: Upload API hiện tại mới là bản dev/local, chưa lưu dữ liệu vào PostgreSQL.
 
 ---
 
-### 3.2. Chuẩn hóa API layer
+### 2.2. Thêm Job Status API mock
 
-Đã tạo cấu trúc API versioning:
+Đã triển khai endpoint:
 
 ```txt
-app/api/v1/
-├── api_router.py
-└── endpoints/
-    ├── admin.py
-    ├── assignments.py
-    ├── auth.py
-    ├── classes.py
-    ├── courses.py
-    ├── health.py
-    ├── jobs.py
-    ├── reports.py
-    ├── submissions.py
-    └── users.py
+GET /api/v1/jobs/{job_id}
 ```
 
 Mục đích:
 
-* Tách API theo từng nhóm chức năng.
-* Dễ mở rộng khi thêm endpoint mới.
-* Chuẩn bị cho các API chính như upload file, job status, report, auth và academic management.
+* Cho phép frontend kiểm tra trạng thái xử lý của file.
+* Chuẩn bị cho job status panel ở frontend.
+* Chuẩn bị cho worker pipeline sau này.
+
+Response hiện tại là mock:
+
+```json
+{
+  "job_id": "...",
+  "status": "QUEUED",
+  "progress": 0,
+  "step": "queued",
+  "error_code": null
+}
+```
+
+Ghi chú: Job status hiện chưa đọc từ database thật.
 
 ---
 
-### 3.3. Thêm health check endpoint
+### 2.3. Cập nhật API router
 
-Đã tạo endpoint kiểm tra trạng thái backend:
+Đã cập nhật `app/api/v1/api_router.py` để include các router chính:
+
+```txt
+Health
+Submissions
+Jobs
+```
+
+Các endpoint hiện có:
+
+```txt
+GET  /api/v1/health
+POST /api/v1/submissions/upload
+GET  /api/v1/jobs/{job_id}
+```
+
+---
+
+### 2.4. Cập nhật Health API
+
+Đã chỉnh lại endpoint health check để endpoint cuối cùng là:
 
 ```txt
 GET /api/v1/health
 ```
 
-Mục đích:
-
-* Kiểm tra backend có chạy hay không.
-* Dùng cho giai đoạn demo, test local và kiểm tra triển khai.
-
-Kết quả mong đợi:
+Response:
 
 ```json
 {
@@ -124,330 +150,338 @@ Kết quả mong đợi:
 
 ---
 
-### 3.4. Chuẩn hóa core configuration
+### 2.5. Cập nhật CORS trong FastAPI
 
-Đã cập nhật thư mục `app/core` gồm:
+Đã cập nhật `app/main.py` để cho phép frontend local gọi backend.
 
-```txt
-core/
-├── config.py
-├── security.py
-├── permissions.py
-├── exceptions.py
-└── logging.py
-```
-
-Trong đó:
-
-| File             | Vai trò                             |
-| ---------------- | ----------------------------------- |
-| `config.py`      | Đọc cấu hình từ `.env`              |
-| `security.py`    | Chuẩn bị cho JWT/password hashing   |
-| `permissions.py` | Chuẩn bị cho phân quyền theo role   |
-| `exceptions.py`  | Chuẩn bị xử lý exception thống nhất |
-| `logging.py`     | Chuẩn bị logging hệ thống           |
-
----
-
-### 3.5. Thêm database layer
-
-Đã tạo thư mục:
+Các origin được cho phép:
 
 ```txt
-app/db/
-├── base.py
-├── session.py
-└── init_db.py
+http://localhost:5173
+http://127.0.0.1:5173
+http://localhost:3000
+http://127.0.0.1:3000
 ```
 
 Mục đích:
 
-* Chuẩn bị kết nối PostgreSQL.
-* Chuẩn bị SQLAlchemy Base.
-* Chuẩn bị cho Alembic migration.
-* Tách database layer khỏi `core`.
-
-File cũ `app/core/database.py` đã được xóa vì không còn phù hợp với cấu trúc mới.
+* Cho phép React frontend chạy song song với FastAPI backend.
+* Tránh lỗi CORS khi frontend gọi API upload.
+* Chuẩn bị cho tích hợp frontend/backend.
 
 ---
 
-### 3.6. Chuẩn hóa models
+### 2.6. Cập nhật dependencies
 
-Đã chuẩn hóa thư mục `app/models` theo cấu trúc mới:
+Đã cập nhật `requirements.txt`.
 
-```txt
-models/
-├── user.py
-├── course.py
-├── class_model.py
-├── assignment.py
-├── submission.py
-├── file.py
-├── processing_job.py
-├── citation.py
-├── metadata_record.py
-├── score.py
-├── warning.py
-├── report.py
-├── audit_log.py
-└── __init__.py
-```
-
-Các file model cũ đã được xóa:
+Package quan trọng đã bổ sung:
 
 ```txt
-analysis_job.py
-document.py
-export.py
-metadata_check.py
-reference.py
-```
-
-Lý do xóa:
-
-* Tên file chưa thống nhất với cấu trúc mới.
-* Một số file bị trùng vai trò với model chuẩn mới.
-* Cần chuẩn hóa tên model trước khi tạo database schema bằng Alembic.
-
----
-
-### 3.7. Chuẩn hóa schemas
-
-Đã chuẩn hóa thư mục `app/schemas`:
-
-```txt
-schemas/
-├── auth_schema.py
-├── user_schema.py
-├── course_schema.py
-├── assignment_schema.py
-├── submission_schema.py
-├── job_schema.py
-├── report_schema.py
-├── common_schema.py
-└── __init__.py
+python-multipart
 ```
 
 Mục đích:
 
-* Tách schemas khỏi models.
-* Chuẩn bị cho request/response validation của FastAPI.
-* Giữ quy ước đặt tên rõ ràng bằng hậu tố `_schema.py`.
+* FastAPI cần package này để xử lý `multipart/form-data`.
+* Đây là package bắt buộc cho chức năng upload file.
 
 ---
 
-### 3.8. Chuẩn hóa services
+## 3. Chuẩn hóa cấu trúc module theo SRS
 
-Đã chuẩn hóa thư mục `app/services`:
+### 3.1. Bổ sung export module
+
+Đã thêm thư mục:
 
 ```txt
-services/
-├── auth_service.py
-├── course_service.py
-├── assignment_service.py
-├── submission_service.py
-├── file_storage_service.py
-├── job_service.py
-├── report_service.py
-├── audit_service.py
-└── __init__.py
+app/export/
+```
+
+Gồm các file:
+
+```txt
+app/export/__init__.py
+app/export/pdf_exporter.py
+app/export/docx_exporter.py
+app/export/xlsx_exporter.py
+```
+
+Mục đích:
+
+* Chuẩn bị cho chức năng export report.
+* Hỗ trợ export theo các định dạng PDF, DOCX, XLSX trong giai đoạn sau.
+* Tách logic export khỏi `services/` và `reports.py`.
+
+---
+
+### 3.2. Bổ sung models theo SRS
+
+Đã bổ sung các model skeleton còn thiếu theo logical data model của SRS:
+
+```txt
+app/models/role_permission.py
+app/models/term.py
+app/models/student.py
+app/models/extracted_document.py
+app/models/reference_section.py
+app/models/citation_field.py
+app/models/score_component.py
+app/models/trust_score.py
+app/models/scoring_config.py
+app/models/metadata_provider.py
+```
+
+Các model này chuẩn bị cho các nhóm dữ liệu:
+
+* Phân quyền người dùng.
+* Học kỳ.
+* Sinh viên.
+* Tài liệu đã trích xuất.
+* Section tài liệu tham khảo.
+* Trường dữ liệu citation.
+* Điểm thành phần.
+* Trust Score tổng.
+* Cấu hình chấm điểm.
+* Nhà cung cấp metadata.
+
+---
+
+### 3.3. Xóa model cũ không còn phù hợp
+
+Đã xóa:
+
+```txt
+app/models/score.py
+```
+
+Lý do:
+
+* Theo hướng SRS, score nên được tách rõ thành:
+
+  * `score_component.py`
+  * `trust_score.py`
+* Tránh gom tất cả logic điểm vào một file chung `score.py`.
+* Giúp database schema rõ ràng hơn khi tạo migration.
+
+Ghi chú kỹ thuật: Git hiển thị dòng rename từ `score.py` sang `db/__init__.py` vì hai file đều rỗng. Điều này không ảnh hưởng đến code.
+
+---
+
+### 3.4. Bổ sung schemas theo SRS
+
+Đã bổ sung các schema skeleton:
+
+```txt
+app/schemas/admin_schema.py
+app/schemas/audit_log_schema.py
+app/schemas/citation_schema.py
+app/schemas/class_schema.py
+app/schemas/extracted_document_schema.py
+app/schemas/file_schema.py
+app/schemas/metadata_provider_schema.py
+app/schemas/metadata_schema.py
+app/schemas/reference_section_schema.py
+app/schemas/role_permission_schema.py
+app/schemas/score_schema.py
+app/schemas/scoring_config_schema.py
+app/schemas/student_schema.py
+app/schemas/term_schema.py
+```
+
+Mục đích:
+
+* Chuẩn bị request/response schema cho các module sau.
+* Giữ quy ước đặt tên theo hậu tố `_schema.py`.
+* Tách Pydantic schema khỏi SQLAlchemy model.
+
+---
+
+### 3.5. Bổ sung services theo SRS
+
+Đã bổ sung các service skeleton:
+
+```txt
+app/services/admin_service.py
+app/services/class_service.py
+app/services/export_service.py
+app/services/user_service.py
 ```
 
 Mục đích:
 
 * Tách business logic khỏi endpoint.
-* Chuẩn bị cho các chức năng như upload file, tạo submission, tạo processing job và sinh report.
+* Chuẩn bị logic cho quản trị, lớp học phần, export và user.
+* Giữ kiến trúc backend theo hướng endpoint → service → model/database.
 
 ---
 
-### 3.9. Thêm processing layer
-
-Đã tạo cấu trúc xử lý nghiệp vụ chuyên sâu:
-
-```txt
-processing/
-├── extraction/
-│   ├── pdf_extractor.py
-│   ├── docx_extractor.py
-│   └── reference_detector.py
-│
-├── citation/
-│   ├── citation_splitter.py
-│   ├── citation_parser.py
-│   ├── citation_normalizer.py
-│   └── style_detector.py
-│
-├── metadata/
-│   ├── crossref_client.py
-│   ├── openalex_client.py
-│   ├── semantic_scholar_client.py
-│   └── metadata_matcher.py
-│
-├── nlp/
-│   ├── topic_extractor.py
-│   ├── embedding_service.py
-│   └── relevance_scorer.py
-│
-└── scoring/
-    ├── format_score.py
-    ├── existence_score.py
-    ├── credibility_score.py
-    ├── recency_score.py
-    ├── relevance_score.py
-    ├── trust_score.py
-    └── warning_generator.py
-```
-
-Mục đích:
-
-* Tách rõ các bước xử lý file.
-* Chuẩn bị pipeline: extract text → detect references → parse citation → lookup metadata → relevance scoring → trust score → warning generation.
-* Tránh để nhiều file xử lý nằm trực tiếp trong `processing/`.
-
----
-
-### 3.10. Thêm worker layer
-
-Đã tạo:
-
-```txt
-workers/
-├── celery_app.py
-└── tasks.py
-```
-
-Mục đích:
-
-* Chuẩn bị cho xử lý bất đồng bộ.
-* Sau này dùng cho file processing, metadata lookup và scoring.
-* Tránh để request upload bị block quá lâu.
-
----
-
-### 3.11. Cập nhật môi trường cấu hình
+### 3.6. Bổ sung database package initializer
 
 Đã thêm:
 
 ```txt
-.env.example
+app/db/__init__.py
 ```
 
 Mục đích:
 
-* Cung cấp file mẫu cho biến môi trường.
-* Không đưa `.env` thật lên GitHub.
-* Giúp thành viên khác biết cần cấu hình gì khi chạy backend local.
-
-Đã cập nhật `.gitignore` để loại trừ:
-
-```txt
-.env
-.venv/
-__pycache__/
-*.pyc
-uploads/
-exports/
-_backup_cleanup/
-```
+* Đảm bảo `app/db` là Python package.
+* Hỗ trợ import ổn định cho database layer.
+* Chuẩn bị cho Alembic và SQLAlchemy models.
 
 ---
 
-### 3.12. Cập nhật dependencies
+## 4. Commit đã tạo hôm nay
 
-Đã cài và cập nhật các package nền tảng:
+### Commit 1
 
 ```txt
-fastapi
-uvicorn
-sqlalchemy
-alembic
-psycopg2-binary
-pydantic-settings
-python-dotenv
+80081d3 feat: add local upload and job status API
 ```
 
-Mục đích:
+Nội dung:
 
-* Chạy FastAPI backend.
-* Kết nối PostgreSQL.
-* Chuẩn bị migration bằng Alembic.
-* Đọc cấu hình môi trường từ `.env`.
+* Cập nhật API router.
+* Thêm/sửa Health API.
+* Thêm Upload API.
+* Thêm Job Status API mock.
+* Cập nhật CORS trong `main.py`.
+* Cập nhật `requirements.txt`.
 
 ---
 
-### 3.13. Commit và push thay đổi
-
-Đã commit và push cấu trúc backend mới lên GitHub.
-
-Commit gần nhất:
+### Commit 2
 
 ```txt
-701f881
+d1b61b0 chore: align backend modules with SRS
 ```
 
-Repository đã được cập nhật lên branch:
+Nội dung:
 
-```txt
-main
-```
+* Bổ sung `app/export/`.
+* Bổ sung các model skeleton theo SRS.
+* Bổ sung các schema skeleton theo SRS.
+* Bổ sung các service skeleton theo SRS.
+* Thêm `app/db/__init__.py`.
+* Xóa `app/models/score.py`.
 
 ---
 
-## 4. Kết quả đạt được
+## 5. Kết quả đạt được trong ngày
 
-| Hạng mục                           | Trạng thái |
-| ---------------------------------- | ---------- |
-| Chuẩn hóa backend folder structure | Hoàn thành |
-| Tách API layer                     | Hoàn thành |
-| Tách core configuration            | Hoàn thành |
-| Thêm database layer                | Hoàn thành |
-| Chuẩn hóa models                   | Hoàn thành |
-| Chuẩn hóa schemas                  | Hoàn thành |
-| Chuẩn hóa services                 | Hoàn thành |
-| Thêm processing layer              | Hoàn thành |
-| Thêm workers layer                 | Hoàn thành |
-| Cập nhật `.env.example`            | Hoàn thành |
-| Cập nhật `.gitignore`              | Hoàn thành |
-| Commit và push lên GitHub          | Hoàn thành |
+| Hạng mục                               | Trạng thái |
+| -------------------------------------- | ---------- |
+| Upload API local/dev                   | Hoàn thành |
+| Upload DOCX test thực tế               | Hoàn thành |
+| Sinh checksum SHA-256                  | Hoàn thành |
+| Sinh `submission_id`                   | Hoàn thành |
+| Sinh `file_id`                         | Hoàn thành |
+| Sinh `job_id`                          | Hoàn thành |
+| Job Status API mock                    | Hoàn thành |
+| CORS cho frontend local                | Hoàn thành |
+| API router cho Health/Submissions/Jobs | Hoàn thành |
+| Export module skeleton                 | Hoàn thành |
+| Models skeleton theo SRS               | Hoàn thành |
+| Schemas skeleton theo SRS              | Hoàn thành |
+| Services skeleton theo SRS             | Hoàn thành |
+| Xóa model score cũ                     | Hoàn thành |
+| Commit upload API                      | Hoàn thành |
+| Commit chuẩn hóa module SRS            | Hoàn thành |
 
 ---
 
-## 5. Trạng thái hiện tại
+## 6. Trạng thái backend hiện tại
 
-Backend hiện tại đã có cấu trúc nền để tiếp tục phát triển các chức năng chính.
+Backend hiện tại đã đạt trạng thái:
 
-Tuy nhiên, các chức năng nghiệp vụ chính vẫn chưa hoàn thiện:
+```txt
+Backend MVP Foundation + Upload Flow Dev Completed
+```
 
-* Chưa tạo database schema bằng Alembic.
-* Chưa có bảng PostgreSQL chính thức.
-* Chưa hoàn thiện API upload lưu database.
-* Chưa có processing job thật.
+Backend đã có:
+
+* Cấu trúc module bám theo SRS.
+* API upload file chạy được.
+* API job status mock.
+* CORS cho frontend.
+* Các module skeleton cho database, processing, scoring, metadata, report và export.
+
+Tuy nhiên, backend vẫn chưa có persistence thật cho upload flow.
+
+---
+
+## 7. Các phần chưa hoàn thành
+
+Các phần còn thiếu:
+
+* Chưa push commit mới lên GitHub nếu chưa chạy `git push`.
+* Chưa tạo PostgreSQL schema thật.
+* Chưa tạo Alembic migration cho các bảng upload flow.
+* Chưa lưu `files`, `submissions`, `processing_jobs` vào database.
+* Chưa có job status đọc từ database.
 * Chưa có worker xử lý file thật.
-* Chưa có Trust Score pipeline thật.
-* Chưa có report export thật.
+* Chưa trích xuất nội dung PDF/DOCX thật.
+* Chưa nhận diện section tài liệu tham khảo thật.
+* Chưa tách citation thật.
+* Chưa metadata lookup thật.
+* Chưa tính Trust Score thật.
+* Chưa sinh report thật.
+* Chưa export PDF/DOCX/XLSX thật.
 
 ---
 
-## 6. Công việc tiếp theo
+## 8. Công việc tiếp theo
 
-Các bước tiếp theo đề xuất:
+Bước tiếp theo nên thực hiện là:
 
-1. Kiểm tra lại FastAPI chạy được tại `/docs`.
-2. Tạo API upload local để backend và frontend có thể chạy song song.
-3. Tạo model `User` chuẩn SQLAlchemy.
-4. Cấu hình Alembic để nhận `Base.metadata`.
-5. Tạo migration đầu tiên cho bảng `users`.
-6. Chạy `alembic upgrade head`.
-7. Kiểm tra PostgreSQL đã nhận bảng.
-8. Tiếp tục tạo các bảng cốt lõi: `courses`, `classes`, `assignments`, `files`, `submissions`, `processing_jobs`.
+```txt
+Database Phase 1 - Upload Flow Tables
+```
+
+Các bảng cần làm trước:
+
+```txt
+users
+courses
+classes
+assignments
+files
+submissions
+processing_jobs
+```
+
+Thứ tự đề xuất:
+
+1. Kiểm tra lại `git status`.
+2. Push 2 commit mới lên GitHub nếu chưa push.
+3. Viết SQLAlchemy model thật cho 7 bảng upload flow.
+4. Kiểm tra `app/models/__init__.py` chỉ import các model cần migration ở phase này.
+5. Cấu hình Alembic nhận `Base.metadata`.
+6. Tạo migration đầu tiên:
+
+```txt
+alembic revision --autogenerate -m "create upload flow tables"
+```
+
+7. Apply migration:
+
+```txt
+alembic upgrade head
+```
+
+8. Kiểm tra PostgreSQL đã có bảng.
+9. Sửa Upload API để lưu dữ liệu thật vào PostgreSQL.
+10. Sửa Job API để đọc job status thật từ database.
 
 ---
 
-## 7. Ghi chú kỹ thuật
+## 9. Ghi chú kỹ thuật
 
-* Không commit file `.env` vì có thể chứa mật khẩu PostgreSQL.
-* Không commit thư mục `.venv`.
-* Không commit thư mục `uploads/` và `exports/`.
-* Các file trong `processing/` hiện mới là skeleton, chưa có logic xử lý đầy đủ.
-* Các file trong `models/` hiện cần được bổ sung class SQLAlchemy trước khi migration.
-* Cấu trúc hiện tại ưu tiên khả năng mở rộng và bảo trì cho MVP.
+* Upload API hiện tại vẫn là dev/local version.
+* Không commit thư mục `uploads/`.
+* Không commit `.env`.
+* Không commit `.venv`.
+* Các file mới trong `models/`, `schemas/`, `services/`, `export/` hiện chủ yếu là skeleton.
+* Không nên import toàn bộ model skeleton vào Alembic ngay.
+* Phase database đầu tiên chỉ nên tập trung vào 7 bảng phục vụ upload flow.
