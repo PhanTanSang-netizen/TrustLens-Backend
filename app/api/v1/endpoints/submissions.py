@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
+from app.schemas.extracted_document_schema import AnalyzeSubmissionResponse
 from app.schemas.submission_schema import SubmissionUploadResponse
+from app.services.extraction_service import analyze_submission_text
 from app.services.file_storage_service import validate_and_store_upload_file
 from app.services.submission_service import (
     create_submission_with_file_and_job,
@@ -77,4 +79,25 @@ async def upload_submission_file(
         "submission": submission,
         "file": db_file,
         "job": job,
+    }
+
+
+@router.post(
+    "/{submission_id}/analyze",
+    response_model=AnalyzeSubmissionResponse,
+)
+def analyze_submission_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, extracted_document = analyze_submission_text(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Trích xuất text từ tài liệu thành công.",
+        "job": job,
+        "extracted_document": extracted_document,
     }
