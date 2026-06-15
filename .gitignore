@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 uploads/
 exports/
+_backup_migrations/
