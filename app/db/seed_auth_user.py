@@ -5,7 +5,7 @@ from app.db.session import SessionLocal
 from app.models.user import User
 
 
-DEMO_EMAIL = "lecturer@trustlens.local"
+DEMO_EMAIL = "lecturer@trustlens.vn"
 DEMO_PASSWORD = "123456"
 
 
