@@ -10,7 +10,6 @@ from app.models.file import File as FileModel
 from app.models.processing_job import ProcessingJob
 from app.models.submission import Submission
 from app.processing.extraction.docx_extractor import extract_text_from_docx
-from app.processing.extraction.pdf_extractor import extract_text_from_pdf
 
 
 def get_submission_by_id(
@@ -116,16 +115,12 @@ def analyze_submission_text(
     try:
         if stored_path.suffix.lower() == ".docx":
             extracted_result = extract_text_from_docx(str(stored_path))
-
-        elif stored_path.suffix.lower() == ".pdf":
-            extracted_result = extract_text_from_pdf(str(stored_path))
-
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "error_code": "EXTRACTION_FORMAT_NOT_SUPPORTED",
-                    "message": "Hệ thống chỉ hỗ trợ trích xuất PDF hoặc DOCX.",
+                    "message": "Hiện tại hệ thống mới hỗ trợ trích xuất DOCX ở bước này.",
                     "details": {
                         "stored_path": file_record.stored_path,
                         "extension": stored_path.suffix.lower(),
@@ -148,7 +143,6 @@ def analyze_submission_text(
                 status="EXTRACTED",
             )
             db.add(extracted_document)
-
         else:
             extracted_document.full_text = extracted_result.full_text
             extracted_document.page_count = extracted_result.page_count
