@@ -1,9 +1,1 @@
-from app.models.user import User
-from app.models.course import Course
-from app.models.submission import Submission
-from app.models.document import Document
-from app.models.analysis_job import AnalysisJob
-from app.models.reference import Reference
-from app.models.metadata_check import MetadataCheck
-from app.models.score import Score
-from app.models.export import Export
+# SQLAlchemy model imports will be added here for Alembic autogenerate.

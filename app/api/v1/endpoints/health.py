@@ -2,6 +2,10 @@ from fastapi import APIRouter
 
 router = APIRouter()
 
-@router.get("/")
+
+@router.get("/health")
 def health_check():
-    return {"status": "TrustLens Backend is Healthy"}
+    return {
+        "status": "ok",
+        "service": "TrustLens Backend"
+    }
