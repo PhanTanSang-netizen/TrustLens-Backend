@@ -19,6 +19,9 @@ from app.services.reference_section_service import detect_and_save_reference_sec
 from app.schemas.citation_schema import ParseCitationsResponse
 from app.services.citation_service import parse_and_save_citations
 
+from app.schemas.metadata_record_schema import VerifyMetadataResponse
+from app.services.metadata_verification_service import verify_submission_metadata
+
 router = APIRouter()
 
 
@@ -145,4 +148,60 @@ def parse_citations_endpoint(
         "total": len(citations),
         "job": job,
         "citations": citations,
+    }
+
+@router.post(
+    "/{submission_id}/verify-metadata",
+    response_model=VerifyMetadataResponse,
+)
+def verify_metadata_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, records = verify_submission_metadata(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    verified = len([
+        record
+        for record in records
+        if record.verification_status == "URL_OK"
+    ])
+
+    broken = len([
+        record
+        for record in records
+        if record.verification_status == "URL_BROKEN"
+    ])
+
+    forbidden = len([
+        record
+        for record in records
+        if record.verification_status == "URL_FORBIDDEN"
+    ])
+
+    unreachable = len([
+        record
+        for record in records
+        if record.verification_status == "URL_UNREACHABLE"
+    ])
+
+    not_provided = len([
+        record
+        for record in records
+        if record.verification_status == "URL_NOT_PROVIDED"
+    ])
+
+    return {
+        "message": "Kiểm chứng metadata URL thành công.",
+        "total": len(records),
+        "verified": verified,
+        "broken": broken,
+        "forbidden": forbidden,
+        "unreachable": unreachable,
+        "not_provided": not_provided,
+        "job": job,
+        "records": records,
     }
