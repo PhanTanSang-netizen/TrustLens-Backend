@@ -14,6 +14,8 @@ from app.services.submission_service import (
     get_assignment_by_id,
 )
 
+from app.schemas.reference_section_schema import DetectReferenceSectionResponse
+from app.services.reference_section_service import detect_and_save_reference_section
 
 router = APIRouter()
 
@@ -100,4 +102,24 @@ def analyze_submission_endpoint(
         "message": "Trích xuất text từ tài liệu thành công.",
         "job": job,
         "extracted_document": extracted_document,
+    }
+
+@router.post(
+    "/{submission_id}/detect-references",
+    response_model=DetectReferenceSectionResponse,
+)
+def detect_reference_section_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, reference_section = detect_and_save_reference_section(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Nhận diện phần tài liệu tham khảo thành công.",
+        "job": job,
+        "reference_section": reference_section,
     }
