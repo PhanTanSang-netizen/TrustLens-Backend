@@ -16,6 +16,8 @@ from app.services.submission_service import (
 
 from app.schemas.reference_section_schema import DetectReferenceSectionResponse
 from app.services.reference_section_service import detect_and_save_reference_section
+from app.schemas.citation_schema import ParseCitationsResponse
+from app.services.citation_service import parse_and_save_citations
 
 router = APIRouter()
 
@@ -122,4 +124,25 @@ def detect_reference_section_endpoint(
         "message": "Nhận diện phần tài liệu tham khảo thành công.",
         "job": job,
         "reference_section": reference_section,
+    }
+
+@router.post(
+    "/{submission_id}/parse-citations",
+    response_model=ParseCitationsResponse,
+)
+def parse_citations_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, citations = parse_and_save_citations(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Tách citation thành công.",
+        "total": len(citations),
+        "job": job,
+        "citations": citations,
     }

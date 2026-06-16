@@ -8,3 +8,4 @@ from app.models.processing_job import ProcessingJob
 
 from app.models.extracted_document import ExtractedDocument
 from app.models.reference_section import ReferenceSection
+from app.models.citation import Citation
