@@ -11,7 +11,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://<FRONTEND-VERCEL-URL>",
+        "https://frontend-trust-lens-fkk2-ar6xkjd7w.vercel.app",
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
