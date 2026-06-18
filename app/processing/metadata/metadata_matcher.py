@@ -39,6 +39,54 @@ class MetadataMatchResult:
     raw_response: dict[str, Any] | None
 
 
+VIETNAMESE_STOPWORDS = {
+    "va",
+    "cua",
+    "cho",
+    "theo",
+    "trong",
+    "ve",
+    "la",
+    "cac",
+    "nhung",
+    "mot",
+    "tu",
+    "tai",
+    "tap",
+    "lan",
+    "thu",
+    "nay",
+    "hien",
+    "qua",
+    "voi",
+    "den",
+    "duoc",
+    "nham",
+    "tren",
+    "duoi",
+    "sau",
+    "truoc",
+}
+
+ENGLISH_STOPWORDS = {
+    "and",
+    "or",
+    "of",
+    "the",
+    "a",
+    "an",
+    "in",
+    "on",
+    "for",
+    "to",
+    "with",
+    "by",
+    "from",
+}
+
+STOPWORDS = VIETNAMESE_STOPWORDS | ENGLISH_STOPWORDS
+
+
 def normalize_text(text: str | None) -> str:
     if not text:
         return ""
@@ -65,6 +113,8 @@ def normalize_doi(doi: str | None) -> str | None:
     doi = doi.strip()
     doi = doi.replace("https://doi.org/", "")
     doi = doi.replace("http://doi.org/", "")
+    doi = doi.replace("https://dx.doi.org/", "")
+    doi = doi.replace("http://dx.doi.org/", "")
     doi = re.sub(r"^doi\s*:\s*", "", doi, flags=re.IGNORECASE)
     doi = doi.strip(" .,\n\t").lower()
 
@@ -72,6 +122,61 @@ def normalize_doi(doi: str | None) -> str | None:
         return None
 
     return doi
+
+
+def tokenize_text(text: str | None) -> list[str]:
+    normalized = normalize_text(text)
+
+    if not normalized:
+        return []
+
+    return [
+        token
+        for token in normalized.split()
+        if len(token) >= 2 and token not in STOPWORDS
+    ]
+
+
+def is_title_too_short_for_academic_search(title: str | None) -> bool:
+    tokens = tokenize_text(title)
+
+    if len(tokens) < 4:
+        return True
+
+    normalized = normalize_text(title)
+
+    if len(normalized) < 18:
+        return True
+
+    return False
+
+
+def token_overlap_scores(
+    input_text: str | None,
+    candidate_text: str | None,
+) -> tuple[float, float, float, float]:
+    input_tokens = tokenize_text(input_text)
+    candidate_tokens = tokenize_text(candidate_text)
+
+    if not input_tokens or not candidate_tokens:
+        return 0.0, 0.0, 0.0, 0.0
+
+    input_set = set(input_tokens)
+    candidate_set = set(candidate_tokens)
+
+    intersection = input_set & candidate_set
+    union = input_set | candidate_set
+
+    jaccard = len(intersection) / len(union) if union else 0.0
+    input_coverage = len(intersection) / len(input_set) if input_set else 0.0
+    candidate_coverage = len(intersection) / len(candidate_set) if candidate_set else 0.0
+
+    length_ratio = min(len(input_tokens), len(candidate_tokens)) / max(
+        len(input_tokens),
+        len(candidate_tokens),
+    )
+
+    return jaccard, input_coverage, candidate_coverage, length_ratio
 
 
 def title_similarity(
@@ -84,7 +189,35 @@ def title_similarity(
     if not left or not right:
         return 0.0
 
-    return SequenceMatcher(None, left, right).ratio()
+    sequence_ratio = SequenceMatcher(None, left, right).ratio()
+    jaccard, input_coverage, candidate_coverage, length_ratio = token_overlap_scores(
+        input_title,
+        candidate_title,
+    )
+
+    score = (
+        sequence_ratio * 0.40
+        + jaccard * 0.30
+        + input_coverage * 0.20
+        + candidate_coverage * 0.10
+    )
+
+    # Nếu title chỉ trùng vài từ khóa rời rạc thì không được đẩy lên partial match.
+    if jaccard < 0.30:
+        score = min(score, 0.50)
+
+    if input_coverage < 0.45 and jaccard < 0.45:
+        score = min(score, 0.58)
+
+    # Nếu độ dài hai title quá lệch, giảm độ tin cậy.
+    if length_ratio < 0.55:
+        score = min(score, 0.62)
+
+    # Title ngắn như "trồng người" quá mơ hồ, không đủ để xác minh học thuật tự động.
+    if is_title_too_short_for_academic_search(input_title):
+        score = min(score, 0.62)
+
+    return round(min(max(score, 0.0), 1.0), 4)
 
 
 def year_similarity(
@@ -100,10 +233,10 @@ def year_similarity(
         return 1.0
 
     if diff == 1:
-        return 0.75
+        return 0.65
 
     if diff <= 3:
-        return 0.45
+        return 0.35
 
     return 0.0
 
@@ -118,7 +251,42 @@ def author_similarity(
     if not left or not right:
         return 0.0
 
-    return SequenceMatcher(None, left, right).ratio()
+    sequence_ratio = SequenceMatcher(None, left, right).ratio()
+    jaccard, input_coverage, candidate_coverage, _ = token_overlap_scores(
+        input_authors,
+        candidate_authors,
+    )
+
+    score = (
+        sequence_ratio * 0.40
+        + jaccard * 0.30
+        + input_coverage * 0.15
+        + candidate_coverage * 0.15
+    )
+
+    return round(min(max(score, 0.0), 1.0), 4)
+
+
+def has_author_conflict(
+    input_authors: str | None,
+    candidate_authors: str | None,
+) -> bool:
+    if not input_authors or not candidate_authors:
+        return False
+
+    score = author_similarity(input_authors, candidate_authors)
+
+    return score < 0.20
+
+
+def has_year_conflict(
+    input_year: int | None,
+    candidate_year: int | None,
+) -> bool:
+    if input_year is None or candidate_year is None:
+        return False
+
+    return abs(int(input_year) - int(candidate_year)) > 3
 
 
 def classify_source_type(
@@ -133,7 +301,7 @@ def classify_source_type(
 
     combined = f"{metadata_type_text} {venue_text} {publisher_text}"
 
-    if "journal" in combined or "article journal" in combined:
+    if "journal" in combined or "journal article" in combined or "article" in combined:
         return "journal"
 
     if "conference" in combined or "proceeding" in combined:
@@ -145,7 +313,7 @@ def classify_source_type(
     if "thesis" in combined or "dissertation" in combined:
         return "thesis"
 
-    if "posted content" in combined or "preprint" in combined:
+    if "posted content" in combined or "posted" in combined or "preprint" in combined:
         return "preprint"
 
     if source_url:
@@ -204,8 +372,8 @@ def build_credibility_explanation(
 
     if source_type in ["website", "academic_web"]:
         return (
-            f"Nguồn có metadata hoặc URL liên quan nhưng cần kiểm tra thủ công "
-            f"thêm; confidence={confidence_score:.2f}."
+            f"Nguồn có metadata hoặc URL liên quan nhưng cần kiểm tra thủ công thêm; "
+            f"confidence={confidence_score:.2f}."
         )
 
     return (
@@ -224,30 +392,55 @@ def calculate_candidate_confidence(
     input_doi = normalize_doi(citation_doi)
     candidate_doi = normalize_doi(candidate.doi)
 
+    # DOI exact match là bằng chứng mạnh nhất.
     if input_doi and candidate_doi and input_doi == candidate_doi:
         return 0.98
+
+    # Nếu citation có DOI nhưng candidate trả DOI khác, không được xem là match.
+    if input_doi and candidate_doi and input_doi != candidate_doi:
+        return 0.0
 
     title_score = title_similarity(citation_title, candidate.title)
     year_score = year_similarity(citation_year, candidate.year)
     author_score = author_similarity(citation_authors, candidate.authors)
 
     confidence = (
-        title_score * 0.70
-        + year_score * 0.15
-        + author_score * 0.15
+        title_score * 0.82
+        + year_score * 0.13
+        + author_score * 0.05
     )
+
+    if has_year_conflict(citation_year, candidate.year):
+        confidence -= 0.25
+
+    if has_author_conflict(citation_authors, candidate.authors) and title_score < 0.90:
+        confidence -= 0.20
+
+    # Không cho title yếu vượt lên thành ambiguous/partial chỉ nhờ year trùng.
+    if title_score < 0.65:
+        confidence = min(confidence, 0.44)
+
+    if title_score < 0.78:
+        confidence = min(confidence, 0.64)
+
+    if title_score < 0.90:
+        confidence = min(confidence, 0.77)
+
+    # Nếu có cả hai năm nhưng không gần nhau, không được partial.
+    if citation_year is not None and candidate.year is not None and year_score == 0.0:
+        confidence = min(confidence, 0.64)
 
     return round(min(max(confidence, 0.0), 1.0), 4)
 
 
 def status_from_confidence(confidence_score: float) -> str:
-    if confidence_score >= 0.85:
+    if confidence_score >= 0.90:
         return "ACADEMIC_VERIFIED"
 
-    if confidence_score >= 0.60:
+    if confidence_score >= 0.78:
         return "ACADEMIC_PARTIAL_MATCH"
 
-    if confidence_score >= 0.45:
+    if confidence_score >= 0.65:
         return "ACADEMIC_AMBIGUOUS"
 
     return "ACADEMIC_NOT_FOUND"

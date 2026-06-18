@@ -286,7 +286,6 @@ def verify_submission_metadata(
         if match_result is not None and match_result.match_status in [
             "ACADEMIC_VERIFIED",
             "ACADEMIC_PARTIAL_MATCH",
-            "ACADEMIC_AMBIGUOUS",
         ]:
             record = _build_record_from_academic_match(
                 submission_id=submission_id,

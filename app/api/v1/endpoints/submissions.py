@@ -157,6 +157,10 @@ def parse_citations_endpoint(
     "/{submission_id}/verify-metadata",
     response_model=VerifyMetadataResponse,
 )
+@router.post(
+    "/{submission_id}/verify-metadata",
+    response_model=VerifyMetadataResponse,
+)
 def verify_metadata_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
@@ -167,60 +171,148 @@ def verify_metadata_endpoint(
         submission_id=submission_id,
     )
 
-    verified = len([
+    def count_by_status(
+        statuses: list[str],
+    ) -> int:
+        return len([
+            record
+            for record in records
+            if record.verification_status in statuses
+        ])
+
+    def get_academic_attempt_status(record) -> str | None:
+        raw_response = record.raw_response
+
+        if not isinstance(raw_response, dict):
+            return None
+
+        academic_attempt = raw_response.get("academic_match_attempt")
+
+        if not isinstance(academic_attempt, dict):
+            return None
+
+        status_value = academic_attempt.get("match_status")
+
+        if status_value is None:
+            return None
+
+        return str(status_value)
+
+    def count_academic_attempt_status(
+        statuses: list[str],
+    ) -> int:
+        return len([
+            record
+            for record in records
+            if get_academic_attempt_status(record) in statuses
+        ])
+
+    academic_verified = count_by_status([
+        "ACADEMIC_VERIFIED",
+    ])
+
+    academic_partial = count_by_status([
+        "ACADEMIC_PARTIAL_MATCH",
+    ])
+
+    academic_ambiguous = (
+        count_by_status([
+            "ACADEMIC_AMBIGUOUS",
+        ])
+        + count_academic_attempt_status([
+            "ACADEMIC_AMBIGUOUS",
+        ])
+    )
+
+    academic_not_found = (
+        count_by_status([
+            "ACADEMIC_NOT_FOUND",
+        ])
+        + count_academic_attempt_status([
+            "ACADEMIC_NOT_FOUND",
+        ])
+    )
+
+    academic_lookup_attempted = len([
         record
         for record in records
-        if record.verification_status in [
-            "URL_OK",
-            "DOI_OK",
+        if record.provider in [
+            "Crossref",
+            "OpenAlex",
         ]
+        or get_academic_attempt_status(record) is not None
     ])
 
-    basic_metadata_present = len([
-        record
-        for record in records
-        if record.verification_status == "BASIC_METADATA_PRESENT"
+    doi_ok = count_by_status([
+        "DOI_OK",
     ])
 
-    broken = len([
-        record
-        for record in records
-        if record.verification_status == "URL_BROKEN"
+    doi_unreachable = count_by_status([
+        "DOI_UNREACHABLE",
     ])
 
-    forbidden = len([
-        record
-        for record in records
-        if record.verification_status == "URL_FORBIDDEN"
+    url_ok = count_by_status([
+        "URL_OK",
     ])
 
-    unreachable = len([
-        record
-        for record in records
-        if record.verification_status in [
-            "URL_UNREACHABLE",
-            "DOI_UNREACHABLE",
-        ]
+    url_weak_evidence = count_by_status([
+        "URL_WEAK_EVIDENCE",
     ])
 
-    not_provided = len([
-        record
-        for record in records
-        if record.verification_status in [
-            "URL_NOT_PROVIDED",
-            "METADATA_NOT_PROVIDED",
-        ]
+    url_broken = count_by_status([
+        "URL_BROKEN",
     ])
+
+    url_forbidden = count_by_status([
+        "URL_FORBIDDEN",
+    ])
+
+    url_unreachable = count_by_status([
+        "URL_UNREACHABLE",
+    ])
+
+    basic_metadata_present = count_by_status([
+        "BASIC_METADATA_PRESENT",
+    ])
+
+    not_provided = count_by_status([
+        "URL_NOT_PROVIDED",
+        "METADATA_NOT_PROVIDED",
+    ])
+
+    # Legacy field:
+    # verified không còn tính URL_OK nữa.
+    # Vì URL_OK chỉ chứng minh link sống, không chứng minh tài liệu học thuật khớp.
+    verified = academic_verified + doi_ok
 
     return {
         "message": "Kiểm chứng metadata thành công.",
         "total": len(records),
+
         "verified": verified,
+
+        "academic_verified": academic_verified,
+        "academic_partial": academic_partial,
+        "academic_ambiguous": academic_ambiguous,
+        "academic_not_found": academic_not_found,
+        "academic_lookup_attempted": academic_lookup_attempted,
+
+        "doi_ok": doi_ok,
+        "doi_unreachable": doi_unreachable,
+        "url_ok": url_ok,
+        "url_weak_evidence": url_weak_evidence,
+        "url_broken": url_broken,
+        "url_forbidden": url_forbidden,
+        "url_unreachable": url_unreachable,
+
         "basic_metadata_present": basic_metadata_present,
-        "broken": broken,
-        "forbidden": forbidden,
-        "unreachable": unreachable,
+
+        # Legacy-compatible summary
+        "broken": url_broken,
+        "forbidden": url_forbidden,
+        "unreachable": url_unreachable + doi_unreachable,
         "not_provided": not_provided,
+
         "job": job,
         "records": records,
     }
