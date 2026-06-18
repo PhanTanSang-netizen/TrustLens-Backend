@@ -29,6 +29,7 @@ class VerifyMetadataResponse(BaseModel):
     message: str
     total: int
     verified: int
+    basic_metadata_present: int
     broken: int
     forbidden: int
     unreachable: int

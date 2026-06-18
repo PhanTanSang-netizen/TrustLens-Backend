@@ -111,27 +111,90 @@ def verify_submission_metadata(
     metadata_records: list[MetadataRecord] = []
 
     for citation in citations:
-        url_check = check_url_exists(citation.url)
+        provider = "BASIC_CHECK"
+        query_type = "none"
+        query_value = None
+        source_url = None
+        verification_status = "METADATA_NOT_PROVIDED"
+        confidence_score = 0.0
+
+        raw_response = {
+            "citation_sequence_no": citation.sequence_no,
+            "citation_title": citation.title,
+            "citation_year": citation.year,
+            "citation_doi": citation.doi,
+            "citation_url": citation.url,
+        }
+
+        if citation.doi:
+            doi_url = f"https://doi.org/{citation.doi}"
+            url_check = check_url_exists(doi_url)
+
+            provider = "DOI_CHECK"
+            query_type = "doi"
+            query_value = citation.doi
+            source_url = url_check.final_url
+            verification_status = (
+                "DOI_OK"
+                if url_check.verification_status == "URL_OK"
+                else "DOI_UNREACHABLE"
+            )
+            confidence_score = url_check.confidence_score
+
+            raw_response.update(
+                {
+                    "checked_url": doi_url,
+                    "status_code": url_check.status_code,
+                    "final_url": url_check.final_url,
+                    "error": url_check.error,
+                }
+            )
+
+        elif citation.url:
+            url_check = check_url_exists(citation.url)
+
+            provider = "URL_CHECK"
+            query_type = "url"
+            query_value = citation.url
+            source_url = url_check.final_url
+            verification_status = url_check.verification_status
+            confidence_score = url_check.confidence_score
+
+            raw_response.update(
+                {
+                    "checked_url": citation.url,
+                    "status_code": url_check.status_code,
+                    "final_url": url_check.final_url,
+                    "error": url_check.error,
+                }
+            )
+
+        elif citation.title or citation.year:
+            provider = "BASIC_METADATA_CHECK"
+            query_type = "title_year"
+            query_value = citation.title
+            source_url = None
+            verification_status = "BASIC_METADATA_PRESENT"
+            confidence_score = 0.35
+
+            raw_response.update(
+                {
+                    "reason": "Citation has title/year but no DOI or URL.",
+                }
+            )
 
         record = MetadataRecord(
             submission_id=submission_id,
             citation_id=citation.id,
-            provider="URL_CHECK",
-            query_type="url",
-            query_value=citation.url,
-            source_url=url_check.final_url,
+            provider=provider,
+            query_type=query_type,
+            query_value=query_value,
+            source_url=source_url,
             matched_title=citation.title,
             matched_year=citation.year,
-            verification_status=url_check.verification_status,
-            confidence_score=url_check.confidence_score,
-            raw_response={
-                "citation_sequence_no": citation.sequence_no,
-                "citation_title": citation.title,
-                "citation_url": citation.url,
-                "status_code": url_check.status_code,
-                "final_url": url_check.final_url,
-                "error": url_check.error,
-            },
+            verification_status=verification_status,
+            confidence_score=confidence_score,
+            raw_response=raw_response,
         )
 
         db.add(record)

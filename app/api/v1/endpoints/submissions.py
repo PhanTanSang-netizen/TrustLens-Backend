@@ -47,7 +47,7 @@ async def upload_submission_file(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "error_code": "ASSIGNMENT_NOT_FOUND",
-                "message": "Không tìm thấy bài nộp cần thẩm định.",
+                "message": "Không tìm thấy assignment cần thẩm định.",
                 "details": {
                     "assignment_id": str(assignment_id),
                 },
@@ -109,6 +109,7 @@ def analyze_submission_endpoint(
         "extracted_document": extracted_document,
     }
 
+
 @router.post(
     "/{submission_id}/detect-references",
     response_model=DetectReferenceSectionResponse,
@@ -128,6 +129,7 @@ def detect_reference_section_endpoint(
         "job": job,
         "reference_section": reference_section,
     }
+
 
 @router.post(
     "/{submission_id}/parse-citations",
@@ -150,6 +152,7 @@ def parse_citations_endpoint(
         "citations": citations,
     }
 
+
 @router.post(
     "/{submission_id}/verify-metadata",
     response_model=VerifyMetadataResponse,
@@ -167,7 +170,16 @@ def verify_metadata_endpoint(
     verified = len([
         record
         for record in records
-        if record.verification_status == "URL_OK"
+        if record.verification_status in [
+            "URL_OK",
+            "DOI_OK",
+        ]
+    ])
+
+    basic_metadata_present = len([
+        record
+        for record in records
+        if record.verification_status == "BASIC_METADATA_PRESENT"
     ])
 
     broken = len([
@@ -185,19 +197,26 @@ def verify_metadata_endpoint(
     unreachable = len([
         record
         for record in records
-        if record.verification_status == "URL_UNREACHABLE"
+        if record.verification_status in [
+            "URL_UNREACHABLE",
+            "DOI_UNREACHABLE",
+        ]
     ])
 
     not_provided = len([
         record
         for record in records
-        if record.verification_status == "URL_NOT_PROVIDED"
+        if record.verification_status in [
+            "URL_NOT_PROVIDED",
+            "METADATA_NOT_PROVIDED",
+        ]
     ])
 
     return {
-        "message": "Kiểm chứng metadata URL thành công.",
+        "message": "Kiểm chứng metadata thành công.",
         "total": len(records),
         "verified": verified,
+        "basic_metadata_present": basic_metadata_present,
         "broken": broken,
         "forbidden": forbidden,
         "unreachable": unreachable,

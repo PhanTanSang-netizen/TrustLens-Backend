@@ -23,7 +23,7 @@ def is_new_citation_line(line: str) -> bool:
     if re.match(r"^(\[\d+\]|\d+[\.\)])\s+", normalized):
         return True
 
-    if re.search(r"\((19|20)\d{2}\)", normalized[:160]):
+    if re.search(r"\((19|20)\d{2}\)", normalized[:180]):
         return True
 
     return False
@@ -51,49 +51,64 @@ def extract_year(text: str) -> int | None:
 
 
 def extract_url(text: str) -> str | None:
-    match = re.search(r"https?://[^\s]+", text)
+    match = re.search(r"https?://[^\s\]\)]+", text)
 
     if not match:
         return None
 
-    return match.group(0).rstrip(".,")
+    return match.group(0).rstrip(".,;)")
 
 
 def extract_doi(text: str) -> str | None:
-    match = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b", text, re.IGNORECASE)
+    match = re.search(
+        r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b",
+        text,
+        re.IGNORECASE,
+    )
 
     if not match:
         return None
 
-    return match.group(0).rstrip(".,")
+    return match.group(0).rstrip(".,;)")
 
 
 def detect_style(text: str) -> str:
-    if re.match(r"^\[\d+\]", text.strip()):
+    normalized = text.strip()
+
+    if re.match(r"^\[\d+\]", normalized):
         return "IEEE"
 
-    if re.search(r"\((19|20)\d{2}\)", text[:160]):
-        return "AUTHOR_YEAR"
-
-    if re.match(r"^\d+[\.\)]\s+", text.strip()):
+    if re.match(r"^\d+[\.\)]\s+", normalized):
         return "NUMBERED"
+
+    if re.search(r"\((19|20)\d{2}\)", normalized[:180]):
+        return "AUTHOR_YEAR"
 
     return "UNKNOWN"
 
 
 def extract_authors(text: str) -> str | None:
-    match = re.match(r"^(.*?)\s*\((19|20)\d{2}\)", text)
+    cleaned = clean_citation_prefix(text)
 
-    if not match:
-        return None
+    match = re.match(r"^(.*?)\s*\((19|20)\d{2}\)", cleaned)
+    if match:
+        authors = match.group(1).strip(" ,.")
+        return authors or None
 
-    authors = match.group(1).strip(" ,.")
+    match = re.match(r"^(.*?),\s*[\"“]", cleaned)
+    if match:
+        authors = match.group(1).strip(" ,.")
+        return authors or None
 
-    return authors or None
+    first_part = cleaned.split(".", 1)[0].strip(" ,.")
+    if 2 <= len(first_part.split()) <= 12:
+        return first_part
+
+    return None
 
 
-def extract_title(text: str) -> str | None:
-    match = re.search(r"\((19|20)\d{2}\)\s*,?\s*(.*)", text)
+def extract_title_from_author_year(text: str) -> str | None:
+    match = re.search(r"\((19|20)\d{2}\)\s*[\.,]?\s*(.*)", text)
 
     if not match:
         return None
@@ -106,17 +121,72 @@ def extract_title(text: str) -> str | None:
     after_year = re.sub(r"\s+", " ", after_year)
 
     title = re.split(
-        r"\.\s*Truy\s*cập|,\s*Truy\s*cập|\s+Truy\s*cập|,\s*(?:NXB|Nhà xuất bản)|https?://",
+        r"\.\s*Truy\s*cập|,\s*Truy\s*cập|\s+Truy\s*cập|"
+        r",\s*(?:NXB|Nhà xuất bản)|https?://|doi\.org|DOI:",
         after_year,
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
 
-    title = title.strip(" ,.")
+    title = title.strip(" ,.\"“”")
 
     return title or None
 
+
+def extract_title_from_quoted_text(text: str) -> str | None:
+    match = re.search(r"[\"“](.*?)[\"”]", text)
+
+    if not match:
+        return None
+
+    title = match.group(1).strip(" ,.\"“”")
+
+    return title or None
+
+
+def extract_title_generic(text: str) -> str | None:
+    cleaned = clean_citation_prefix(text)
+
+    cleaned = re.sub(r"https?://[^\s]+", "", cleaned)
+    cleaned = re.sub(
+        r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    cleaned = re.sub(r"^.*?\((19|20)\d{2}\)\s*[\.,]?\s*", "", cleaned)
+
+    parts = [
+        part.strip(" ,.\"“”")
+        for part in cleaned.split(".")
+        if part.strip(" ,.\"“”")
+    ]
+
+    if not parts:
+        return None
+
+    for part in parts:
+        word_count = len(part.split())
+        if 3 <= word_count <= 25:
+            return part
+
+    return None
+
+
+def extract_title(text: str) -> str | None:
+    return (
+        extract_title_from_quoted_text(text)
+        or extract_title_from_author_year(text)
+        or extract_title_generic(text)
+    )
+
+
 def split_reference_entries(raw_text: str) -> list[str]:
+    if not raw_text or not raw_text.strip():
+        return []
+
     lines = [
         line.strip()
         for line in raw_text.splitlines()
@@ -141,7 +211,11 @@ def split_reference_entries(raw_text: str) -> list[str]:
     if current_parts:
         entries.append(" ".join(current_parts).strip())
 
-    return entries
+    return [
+        entry
+        for entry in entries
+        if entry and len(entry.split()) >= 3
+    ]
 
 
 def parse_citations_from_reference_text(raw_text: str) -> list[ParsedCitation]:

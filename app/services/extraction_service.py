@@ -114,6 +114,12 @@ def analyze_submission_text(
     stored_path = Path(file_record.stored_path)
 
     if not stored_path.exists():
+        job.status = "FAILED"
+        job.progress = 100
+        job.step = "stored_file_not_found"
+        job.error_code = "STORED_FILE_NOT_FOUND"
+        db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
@@ -140,6 +146,19 @@ def analyze_submission_text(
                 detail={
                     "error_code": "EXTRACTION_FORMAT_NOT_SUPPORTED",
                     "message": "Hệ thống chỉ hỗ trợ trích xuất text từ file PDF hoặc DOCX.",
+                    "details": {
+                        "stored_path": file_record.stored_path,
+                        "extension": file_extension,
+                    },
+                },
+            )
+
+        if not extracted_result.full_text or not extracted_result.full_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "EMPTY_EXTRACTED_TEXT",
+                    "message": "File có thể mở nhưng không trích xuất được text.",
                     "details": {
                         "stored_path": file_record.stored_path,
                         "extension": file_extension,
