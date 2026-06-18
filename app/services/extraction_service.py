@@ -10,6 +10,7 @@ from app.models.file import File as FileModel
 from app.models.processing_job import ProcessingJob
 from app.models.submission import Submission
 from app.processing.extraction.docx_extractor import extract_text_from_docx
+from app.processing.extraction.pdf_extractor import extract_text_from_pdf
 
 
 def get_submission_by_id(
@@ -112,18 +113,36 @@ def analyze_submission_text(
 
     stored_path = Path(file_record.stored_path)
 
+    if not stored_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "STORED_FILE_NOT_FOUND",
+                "message": "Không tìm thấy file đã lưu trên hệ thống.",
+                "details": {
+                    "stored_path": file_record.stored_path,
+                },
+            },
+        )
+
     try:
-        if stored_path.suffix.lower() == ".docx":
+        file_extension = stored_path.suffix.lower()
+
+        if file_extension == ".docx":
             extracted_result = extract_text_from_docx(str(stored_path))
+
+        elif file_extension == ".pdf":
+            extracted_result = extract_text_from_pdf(str(stored_path))
+
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "error_code": "EXTRACTION_FORMAT_NOT_SUPPORTED",
-                    "message": "Hiện tại hệ thống mới hỗ trợ trích xuất DOCX ở bước này.",
+                    "message": "Hệ thống chỉ hỗ trợ trích xuất text từ file PDF hoặc DOCX.",
                     "details": {
                         "stored_path": file_record.stored_path,
-                        "extension": stored_path.suffix.lower(),
+                        "extension": file_extension,
                     },
                 },
             )
