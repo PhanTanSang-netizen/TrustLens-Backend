@@ -65,3 +65,8 @@ class Submission(Base):
         "ProcessingJob",
         back_populates="submission",
     )
+
+    reports = relationship(
+        "Report",
+        back_populates="submission",
+    )

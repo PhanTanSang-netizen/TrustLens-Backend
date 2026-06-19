@@ -67,4 +67,7 @@ def list_classes_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return get_classes(db=db)
+    return get_classes(
+        db=db,
+        lecturer_id=None if current_user.role == "admin" else current_user.id,
+    )
