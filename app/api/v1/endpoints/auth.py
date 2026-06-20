@@ -1,14 +1,105 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token, create_refresh_token, decode_access_token
+from app.core.security import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    is_password_strong_enough,
+)
 from app.db.session import get_db
-from app.schemas.auth_schema import LoginRequest, LoginResponse, RefreshRequest, RefreshResponse
+from app.schemas.auth_schema import (
+    LoginRequest,
+    LoginResponse,
+    RefreshRequest,
+    RefreshResponse,
+    RegisterRequest,
+    RegisterResponse,
+)
 from app.services.audit_service import record_audit_log
-from app.services.auth_service import authenticate_user, get_user_by_id
+from app.services.auth_service import authenticate_user, create_user, get_user_by_email, get_user_by_id
 
 
 router = APIRouter()
+
+
+def _register(
+    payload: RegisterRequest,
+    db: Session,
+) -> dict:
+    if not payload.full_name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "AUTH_FULL_NAME_REQUIRED",
+                "message": "Full name is required.",
+                "details": None,
+            },
+        )
+
+    if not is_password_strong_enough(payload.password):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "AUTH_WEAK_PASSWORD",
+                "message": "Password must be at least 6 characters.",
+                "details": None,
+            },
+        )
+
+    if get_user_by_email(db=db, email=payload.email) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "AUTH_EMAIL_ALREADY_EXISTS",
+                "message": "Email is already registered.",
+                "details": None,
+            },
+        )
+
+    try:
+        user = create_user(
+            db=db,
+            email=payload.email,
+            full_name=payload.full_name,
+            password=payload.password,
+        )
+        record_audit_log(
+            db=db,
+            user_id=user.id,
+            action="SIGN_UP",
+            resource_type="auth",
+            message="User signed up.",
+        )
+        db.commit()
+        db.refresh(user)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error_code": "AUTH_EMAIL_ALREADY_EXISTS",
+                "message": "Email is already registered.",
+                "details": None,
+            },
+        )
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "message": "Sign-up successful.",
+        "user": user,
+    }
+
+
+@router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
+def register(
+    payload: RegisterRequest,
+    db: Session = Depends(get_db),
+):
+    return _register(payload=payload, db=db)
 
 
 @router.post("/login", response_model=LoginResponse)
