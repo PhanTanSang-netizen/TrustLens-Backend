@@ -49,7 +49,8 @@ class ScoringComponentTests(unittest.TestCase):
         )
 
         self.assertGreater(component.score, 3)
-        self.assertEqual(component.evidence["model"], "lexical-tfidf-fallback")
+        self.assertEqual(component.evidence["provider"], "lexical")
+        self.assertEqual(component.evidence["prompt_version"], "c4-v2")
 
 
 if __name__ == "__main__":

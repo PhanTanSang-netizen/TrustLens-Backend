@@ -1,6 +1,7 @@
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from math import sqrt
 import re
 from typing import Any
@@ -60,6 +61,14 @@ class ComponentScore:
             "evidence": self.evidence,
             "confidence": round(self.confidence, 3),
         }
+
+
+@dataclass
+class DuplicateMatch:
+    duplicate_of: UUID
+    match_type: str
+    confidence: float
+    evidence: dict[str, Any]
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -160,6 +169,120 @@ def _token_overlap(left: str | None, right: str | None) -> float:
     if not left_tokens or not right_tokens:
         return 0.0
     return len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+
+
+def _normalized_identifier(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    normalized = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", normalized)
+    normalized = re.sub(r"^doi\s*:\s*", "", normalized)
+    normalized = normalized.rstrip(".,;)")
+    return normalized or None
+
+
+def _normalized_url(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower().rstrip(".,;)")
+    normalized = re.sub(r"^https?://", "", normalized)
+    normalized = normalized.rstrip("/")
+    return normalized or None
+
+
+def _duplicate_exact_keys(citation: Citation) -> list[tuple[str, str]]:
+    keys: list[tuple[str, str]] = []
+    doi = _normalized_identifier(citation.doi)
+    url = _normalized_url(citation.url)
+    if doi:
+        keys.append(("exact_doi", f"doi:{doi}"))
+    if url:
+        keys.append(("exact_url", f"url:{url}"))
+    return keys
+
+
+def _normalized_title_for_duplicate(citation: Citation, metadata: MetadataRecord | None = None) -> str:
+    title = citation.title or (metadata.matched_title if metadata is not None else None)
+    if not title:
+        return ""
+    return " ".join(_text_tokens(title))
+
+
+def _fuzzy_title_similarity(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    sequence_ratio = SequenceMatcher(None, left, right).ratio()
+    overlap = _token_overlap(left, right)
+    cosine = _cosine_token_similarity(left, right)
+    return round(sequence_ratio * 0.35 + overlap * 0.35 + cosine * 0.30, 4)
+
+
+def _fuzzy_author_similarity(left: str | None, right: str | None) -> float:
+    if not left or not right:
+        return 0.0
+    return round(SequenceMatcher(None, " ".join(_text_tokens(left)), " ".join(_text_tokens(right))).ratio(), 4)
+
+
+def _find_duplicate_match(
+    citation: Citation,
+    metadata: MetadataRecord | None,
+    seen: list[tuple[Citation, MetadataRecord | None]],
+    exact_keys: dict[str, UUID],
+) -> DuplicateMatch | None:
+    for match_type, key in _duplicate_exact_keys(citation):
+        duplicate_of = exact_keys.get(key)
+        if duplicate_of is not None:
+            return DuplicateMatch(
+                duplicate_of=duplicate_of,
+                match_type=match_type,
+                confidence=1.0,
+                evidence={"match_type": match_type, "key": key},
+            )
+
+    title = _normalized_title_for_duplicate(citation, metadata)
+    if len(title.split()) < 4:
+        return None
+
+    best: DuplicateMatch | None = None
+    for previous, previous_metadata in seen:
+        previous_title = _normalized_title_for_duplicate(previous, previous_metadata)
+        if len(previous_title.split()) < 4:
+            continue
+
+        title_similarity = _fuzzy_title_similarity(title, previous_title)
+        author_similarity = _fuzzy_author_similarity(citation.authors, previous.authors)
+        year_delta = None
+        if citation.year is not None and previous.year is not None:
+            year_delta = abs(int(citation.year) - int(previous.year))
+
+        year_ok = year_delta is None or year_delta <= 1
+        author_ok = author_similarity == 0.0 or author_similarity >= 0.45
+        is_fuzzy_duplicate = title_similarity >= 0.84 and year_ok and author_ok
+        if not is_fuzzy_duplicate:
+            continue
+
+        confidence = min(0.99, title_similarity * 0.85 + (author_similarity or 0.55) * 0.10 + (0.05 if year_ok else 0.0))
+        if best is None or confidence > best.confidence:
+            best = DuplicateMatch(
+                duplicate_of=previous.id,
+                match_type="fuzzy_title_author_year",
+                confidence=round(confidence, 4),
+                evidence={
+                    "match_type": "fuzzy_title_author_year",
+                    "title_similarity": title_similarity,
+                    "author_similarity": author_similarity,
+                    "year_delta": year_delta,
+                    "matched_title": previous.title or (previous_metadata.matched_title if previous_metadata is not None else None),
+                    "current_title": citation.title or (metadata.matched_title if metadata is not None else None),
+                },
+            )
+
+    return best
+
+
+def _register_duplicate_keys(citation: Citation, exact_keys: dict[str, UUID]) -> None:
+    for _, key in _duplicate_exact_keys(citation):
+        exact_keys.setdefault(key, citation.id)
 
 
 def _cosine_token_similarity(left: str | None, right: str | None) -> float:
@@ -514,12 +637,12 @@ def _score_style(citation: Citation, expected_style: str | None) -> ComponentSco
 def _score_duplicate(
     citation: Citation,
     source_type: str,
-    duplicate_of: UUID | None,
+    duplicate_match: DuplicateMatch | None,
     source_count: int,
     total_citations: int,
 ) -> ComponentScore:
     concentration_limit = max(1, total_citations // 2)
-    if duplicate_of is not None:
+    if duplicate_match is not None:
         score = 1
         reason = "Duplicate reference detected."
     elif source_count > concentration_limit and total_citations >= 3:
@@ -534,7 +657,10 @@ def _score_duplicate(
         max_score=5,
         reason=reason,
         evidence={
-            "duplicate_of": str(duplicate_of) if duplicate_of else None,
+            "duplicate_of": str(duplicate_match.duplicate_of) if duplicate_match else None,
+            "duplicate_match_type": duplicate_match.match_type if duplicate_match else None,
+            "duplicate_confidence": duplicate_match.confidence if duplicate_match else None,
+            "duplicate_evidence": duplicate_match.evidence if duplicate_match else {},
             "source_type": source_type,
             "source_type_count": source_count,
             "total_citations": total_citations,
@@ -583,7 +709,7 @@ def _evaluate_penalties(
     citation: Citation,
     metadata: MetadataRecord | None,
     components: dict[str, ComponentScore],
-    duplicate_of: UUID | None,
+    duplicate_match: DuplicateMatch | None,
 ) -> list[dict[str, Any]]:
     status_value = _metadata_status(metadata)
     raw = _metadata_raw(metadata)
@@ -613,8 +739,20 @@ def _evaluate_penalties(
     elif citation.doi and evidence.get("doi_exact_match") is False and raw.get("matched_doi"):
         penalties.append({"code": "DOI_CONFLICT", "value": 15, "label_cap": "high_risk", "evidence": {"citation_doi": citation.doi, "matched_doi": raw.get("matched_doi")}})
 
-    if duplicate_of is not None:
-        penalties.append({"code": "DUPLICATE_REFERENCE", "value": 5, "label_cap": "needs_review", "evidence": {"duplicate_of": str(duplicate_of)}})
+    if duplicate_match is not None:
+        penalties.append(
+            {
+                "code": "DUPLICATE_REFERENCE",
+                "value": 5,
+                "label_cap": "needs_review",
+                "evidence": {
+                    "duplicate_of": str(duplicate_match.duplicate_of),
+                    "match_type": duplicate_match.match_type,
+                    "confidence": duplicate_match.confidence,
+                    **duplicate_match.evidence,
+                },
+            }
+        )
 
     if str(raw.get("publication_status") or "").upper() == "RETRACTED" or raw.get("is_retracted") is True:
         penalties.append(
@@ -727,6 +865,7 @@ def score_submission(
 
     metadata_by_citation = {record.citation_id: record for record in metadata_records}
     duplicate_keys: dict[str, UUID] = {}
+    seen_for_duplicate: list[tuple[Citation, MetadataRecord | None]] = []
     source_types = {
         citation.id: _source_type(metadata_by_citation.get(citation.id), citation)
         for citation in citations
@@ -743,10 +882,9 @@ def score_submission(
     for citation in citations:
         metadata = metadata_by_citation.get(citation.id)
         source_type = source_types[citation.id]
-        key = (citation.doi or citation.url or citation.title or "").strip().lower()
-        duplicate_of = duplicate_keys.get(key) if key else None
-        if key and duplicate_of is None:
-            duplicate_keys[key] = citation.id
+        duplicate_match = _find_duplicate_match(citation, metadata, seen_for_duplicate, duplicate_keys)
+        _register_duplicate_keys(citation, duplicate_keys)
+        seen_for_duplicate.append((citation, metadata))
 
         components = {
             "c1": _score_completeness(citation, metadata, source_type),
@@ -755,11 +893,11 @@ def score_submission(
             "c4": _score_relevance(citation, metadata, report_text, thresholds, report_context),
             "c5": _score_recency(citation, metadata, thresholds),
             "c6": _score_style(citation, expected_style),
-            "c7": _score_duplicate(citation, source_type, duplicate_of, source_counter[source_type], len(citations)),
+            "c7": _score_duplicate(citation, source_type, duplicate_match, source_counter[source_type], len(citations)),
         }
         components = _apply_component_weights(components, weights)
 
-        penalties = _evaluate_penalties(citation, metadata, components, duplicate_of)
+        penalties = _evaluate_penalties(citation, metadata, components, duplicate_match)
         penalty_total = sum(float(item["value"]) for item in penalties)
         base_score = sum(component.score for component in components.values())
         final_score = round(_clamp(base_score - penalty_total, 0, 100), 2)

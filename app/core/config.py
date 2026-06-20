@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     AI_PERSIST_RAW_INPUT: bool = False
     AI_LOG_INPUT_TEXT: bool = False
 
-    FEATURE_C4_V2: bool = False
+    FEATURE_C4_V2: bool = True
     FEATURE_DOI_CONFLICT_V2: bool = False
     FEATURE_RETRACTION_V2: bool = False
     FEATURE_WEIGHT_INVARIANCE_V2: bool = False
