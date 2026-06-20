@@ -52,3 +52,16 @@ def get_current_user(
         )
 
     return user
+
+
+def require_admin(current_user=Depends(get_current_user)):
+    if getattr(current_user, "role", None) != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "FORBIDDEN_ROLE",
+                "message": "Only administrators can access this resource.",
+                "details": None,
+            },
+        )
+    return current_user

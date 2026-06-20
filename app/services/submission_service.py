@@ -55,7 +55,9 @@ def create_submission_with_file_and_job(
         status="QUEUED",
         progress=0,
         step="queued",
+        current_step="queued",
         error_code=None,
+        created_by=uploaded_by,
     )
 
     db.add(job)

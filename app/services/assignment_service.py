@@ -52,8 +52,12 @@ def create_assignment(
 def get_assignments(
     db: Session,
     class_id: UUID | None = None,
+    lecturer_id: UUID | None = None,
 ) -> list[Assignment]:
     query = select(Assignment)
+
+    if lecturer_id is not None:
+        query = query.join(ClassModel).where(ClassModel.lecturer_id == lecturer_id)
 
     if class_id is not None:
         query = query.where(Assignment.class_id == class_id)

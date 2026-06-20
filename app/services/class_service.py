@@ -48,9 +48,12 @@ def create_class(
 
 def get_classes(
     db: Session,
+    lecturer_id: UUID | None = None,
 ) -> list[ClassModel]:
+    query = select(ClassModel)
+    if lecturer_id is not None:
+        query = query.where(ClassModel.lecturer_id == lecturer_id)
+    query = query.order_by(ClassModel.created_at.desc())
     return list(
-        db.execute(
-            select(ClassModel).order_by(ClassModel.created_at.desc())
-        ).scalars().all()
+        db.execute(query).scalars().all()
     )
