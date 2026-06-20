@@ -76,3 +76,53 @@ def create_report_export(db: Session, report: Report, export_format: str, includ
     db.commit()
     db.refresh(report_export)
     return report_export
+
+
+class ExportedReportFile:
+    def __init__(self, content: bytes, media_type: str, filename: str) -> None:
+        self.content = content
+        self.media_type = media_type
+        self.filename = filename
+
+
+def _get_report_data(db: Session, submission_id: UUID, current_user) -> dict:
+    from app.services.report_service import get_report_by_submission
+
+    return get_report_by_submission(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+
+def export_submission_report_to_docx(db: Session, submission_id: UUID, current_user) -> ExportedReportFile:
+    from app.export.docx_exporter import export_report_to_docx_bytes, generate_docx_report_filename
+
+    report_data = _get_report_data(db=db, submission_id=submission_id, current_user=current_user)
+    return ExportedReportFile(
+        content=export_report_to_docx_bytes(report_data),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=generate_docx_report_filename(str(submission_id)),
+    )
+
+
+def export_submission_report_to_pdf(db: Session, submission_id: UUID, current_user) -> ExportedReportFile:
+    from app.export.pdf_exporter import export_report_to_pdf_bytes, generate_pdf_report_filename
+
+    report_data = _get_report_data(db=db, submission_id=submission_id, current_user=current_user)
+    return ExportedReportFile(
+        content=export_report_to_pdf_bytes(report_data),
+        media_type="application/pdf",
+        filename=generate_pdf_report_filename(str(submission_id)),
+    )
+
+
+def export_submission_report_to_xlsx(db: Session, submission_id: UUID, current_user) -> ExportedReportFile:
+    from app.export.xlsx_exporter import export_report_to_xlsx_bytes, generate_xlsx_report_filename
+
+    report_data = _get_report_data(db=db, submission_id=submission_id, current_user=current_user)
+    return ExportedReportFile(
+        content=export_report_to_xlsx_bytes(report_data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=generate_xlsx_report_filename(str(submission_id)),
+    )

@@ -78,3 +78,29 @@ class AnalyzeJobResponse(BaseModel):
     status: str
     progress: int
     created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def from_job(cls, data):
+        if not hasattr(data, "id"):
+            return data
+        return {
+            "job_id": data.id,
+            "submission_id": data.submission_id,
+            "status": str(data.status).lower(),
+            "progress": data.progress,
+            "created_at": data.created_at,
+            "retry_of_job_id": data.retry_of_job_id,
+        }
+
+
+class JobProcessResponse(AnalyzeJobResponse):
+    retry_of_job_id: UUID | None = None
+
+
+class LatestJobResponse(BaseModel):
+    message: str
+    submission_id: UUID
+    job: JobStatusResponse | None = None

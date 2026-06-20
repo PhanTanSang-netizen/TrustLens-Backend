@@ -16,7 +16,7 @@ from app.services.analysis_pipeline_service import run_analysis_pipeline
 from app.services.audit_service import record_audit_log
 from app.services.citation_service import parse_and_save_citations
 from app.services.file_storage_service import validate_and_store_upload_file
-from app.services.job_service import create_queued_job, get_active_job_for_submission, get_report_by_submission_id
+from app.services.job_service import run_submission_processing_pipeline
 from app.services.metadata_verification_service import verify_submission_metadata
 from app.services.reference_section_service import detect_and_save_reference_section
 from app.services.submission_service import create_submission_with_file_and_job, get_assignment_by_id
@@ -61,24 +61,28 @@ async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: s
 
 @router.post(
     "/{submission_id}/analyze",
-    response_model=AnalyzeSubmissionResponse,
+    response_model=AnalyzeJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def analyze_submission_endpoint(
     submission_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    job, extracted_document = analyze_submission_text(
+    get_accessible_submission_or_404(
         db=db,
         submission_id=submission_id,
+        user=current_user,
     )
-
-    return {
-        "message": "Trích xuất text từ tài liệu thành công.",
-        "job": job,
-        "extracted_document": extracted_document,
-    }
-
+    job = run_submission_processing_pipeline(
+        db=db,
+        submission_id=submission_id,
+        created_by=current_user.id,
+    )
+    if job.status == "QUEUED" and job.started_at is None:
+        background_tasks.add_task(run_analysis_pipeline, str(job.id))
+    return job
 
 @router.post(
     "/{submission_id}/detect-references",
@@ -194,3 +198,4 @@ def verify_metadata_endpoint(
         "job": job,
         "records": records,
     }
+
