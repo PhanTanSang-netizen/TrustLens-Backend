@@ -15,12 +15,35 @@ from app.services.class_service import (
 router = APIRouter()
 
 
+def get_user_role(current_user) -> str:
+    return str(getattr(current_user, "role", "")).strip().upper()
+
+
+def require_lecturer_or_admin(current_user) -> None:
+    role = get_user_role(current_user)
+
+    if role not in ["LECTURER", "ADMIN"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "AUTH_ROLE_FORBIDDEN",
+                "message": "Chỉ giảng viên hoặc quản trị viên được thực hiện thao tác này.",
+                "details": {
+                    "current_role": role,
+                    "required_roles": ["LECTURER", "ADMIN"],
+                },
+            },
+        )
+
+
 @router.post("", response_model=ClassRead, status_code=status.HTTP_201_CREATED)
 def create_class_endpoint(
     payload: ClassCreate,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_lecturer_or_admin(current_user)
+
     course = get_course_by_id(
         db=db,
         course_id=payload.course_id,
@@ -67,7 +90,14 @@ def list_classes_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    require_lecturer_or_admin(current_user)
+
+    role = get_user_role(current_user)
+
+    if role == "ADMIN":
+        return get_classes(db=db)
+
     return get_classes(
         db=db,
-        lecturer_id=None if current_user.role == "admin" else current_user.id,
+        lecturer_id=current_user.id,
     )

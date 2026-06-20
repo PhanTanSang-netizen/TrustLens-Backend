@@ -28,11 +28,33 @@ class MetadataRecordRead(BaseModel):
 class VerifyMetadataResponse(BaseModel):
     message: str
     total: int
+
+    # Legacy field, giữ để frontend cũ không vỡ.
+    # Từ giờ field này chỉ tính academic verified + DOI_OK, KHÔNG tính URL_OK.
     verified: int
+
+    # Academic metadata lookup summary
+    academic_verified: int
+    academic_partial: int
+    academic_ambiguous: int
+    academic_not_found: int
+    academic_lookup_attempted: int
+
+    # URL / DOI fallback summary
+    doi_ok: int
+    doi_unreachable: int
+    url_ok: int
+    url_weak_evidence: int
+    url_broken: int
+    url_forbidden: int
+    url_unreachable: int
+
+    # Legacy-compatible fields
     basic_metadata_present: int
     broken: int
     forbidden: int
     unreachable: int
     not_provided: int
+
     job: JobRead
     records: list[MetadataRecordRead]

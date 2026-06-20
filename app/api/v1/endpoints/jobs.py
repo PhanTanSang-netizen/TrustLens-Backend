@@ -3,18 +3,13 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_lecturer_or_admin
 from app.db.session import get_db
 from app.schemas.job_schema import (
     JobProcessResponse,
     JobStatusResponse,
     LatestJobResponse,
 )
-from app.services.access_control_service import (
-    get_accessible_job_or_404,
-    get_accessible_submission_or_404,
-)
-from app.services.analysis_pipeline_service import run_analysis_pipeline
 from app.services.job_service import (
     get_latest_job_by_submission_id,
     retry_submission_processing_job,
@@ -25,22 +20,30 @@ from app.services.job_service import (
 router = APIRouter()
 
 
-def _enqueue_pipeline_if_needed(background_tasks: BackgroundTasks, job) -> None:
-    if job.status == "QUEUED" and job.started_at is None:
-        background_tasks.add_task(run_analysis_pipeline, str(job.id))
-
-
-@router.get("/{job_id}", response_model=JobStatusResponse)
+@router.get("/{job_id}", response_model=JobRead)
 def read_job_status(
     job_id: UUID,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return get_accessible_job_or_404(
+    job = get_job_by_id(
         db=db,
         job_id=job_id,
-        user=current_user,
     )
+
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "JOB_NOT_FOUND",
+                "message": "Không tìm thấy job xử lý.",
+                "details": {
+                    "job_id": str(job_id),
+                },
+            },
+        )
+
+    return job
 
 
 @router.get(
@@ -50,13 +53,8 @@ def read_job_status(
 def read_latest_submission_job(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
-    get_accessible_submission_or_404(
-        db=db,
-        submission_id=submission_id,
-        user=current_user,
-    )
     job = get_latest_job_by_submission_id(
         db=db,
         submission_id=submission_id,
@@ -78,20 +76,28 @@ def process_submission_pipeline(
     submission_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
-    get_accessible_submission_or_404(
-        db=db,
-        submission_id=submission_id,
-        user=current_user,
-    )
-    job = run_submission_processing_pipeline(
+    return run_submission_processing_pipeline(
         db=db,
         submission_id=submission_id,
         created_by=current_user.id,
     )
     _enqueue_pipeline_if_needed(background_tasks, job)
     return job
+
+
+@router.get("/{job_id}", response_model=JobRead)
+def read_job_status(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_lecturer_or_admin),
+):
+    return ensure_job_access_or_admin(
+        db=db,
+        job_id=job_id,
+        current_user=current_user,
+    )
 
 
 @router.post(
@@ -103,14 +109,9 @@ def retry_job(
     job_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
-    get_accessible_job_or_404(
-        db=db,
-        job_id=job_id,
-        user=current_user,
-    )
-    job = retry_submission_processing_job(
+    return retry_submission_processing_job(
         db=db,
         job_id=job_id,
         created_by=current_user.id,
