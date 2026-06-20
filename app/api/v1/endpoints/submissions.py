@@ -3,16 +3,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_lecturer_or_admin
 from app.db.session import get_db
 from app.schemas.extracted_document_schema import AnalyzeSubmissionResponse
 from app.schemas.submission_schema import SubmissionUploadResponse
+from app.services.access_control_service import (
+    ensure_assignment_access_or_admin,
+    ensure_submission_access_or_admin,
+)
 from app.services.extraction_service import analyze_submission_text
 from app.services.file_storage_service import validate_and_store_upload_file
-from app.services.submission_service import (
-    create_submission_with_file_and_job,
-    get_assignment_by_id,
-)
+from app.services.submission_service import create_submission_with_file_and_job
 
 from app.schemas.reference_section_schema import DetectReferenceSectionResponse
 from app.services.reference_section_service import detect_and_save_reference_section
@@ -35,24 +36,13 @@ async def upload_submission_file(
     owner_label: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
-    assignment = get_assignment_by_id(
+    assignment = ensure_assignment_access_or_admin(
         db=db,
         assignment_id=assignment_id,
+        current_user=current_user,
     )
-
-    if assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error_code": "ASSIGNMENT_NOT_FOUND",
-                "message": "Không tìm thấy assignment cần thẩm định.",
-                "details": {
-                    "assignment_id": str(assignment_id),
-                },
-            },
-        )
 
     if assignment.status != "OPEN":
         raise HTTPException(
@@ -96,8 +86,14 @@ async def upload_submission_file(
 def analyze_submission_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+    db=db,
+    submission_id=submission_id,
+    current_user=current_user,
+    )
+    
     job, extracted_document = analyze_submission_text(
         db=db,
         submission_id=submission_id,
@@ -117,8 +113,14 @@ def analyze_submission_endpoint(
 def detect_reference_section_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
     job, reference_section = detect_and_save_reference_section(
         db=db,
         submission_id=submission_id,
@@ -138,8 +140,14 @@ def detect_reference_section_endpoint(
 def parse_citations_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
     job, citations = parse_and_save_citations(
         db=db,
         submission_id=submission_id,
@@ -157,15 +165,24 @@ def parse_citations_endpoint(
     "/{submission_id}/verify-metadata",
     response_model=VerifyMetadataResponse,
 )
-@router.post(
-    "/{submission_id}/verify-metadata",
-    response_model=VerifyMetadataResponse,
-)
+
 def verify_metadata_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
     job, records = verify_submission_metadata(
         db=db,
         submission_id=submission_id,

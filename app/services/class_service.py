@@ -26,6 +26,15 @@ def get_class_by_code(
     ).scalar_one_or_none()
 
 
+def get_class_by_id(
+    db: Session,
+    class_id: UUID,
+) -> ClassModel | None:
+    return db.execute(
+        select(ClassModel).where(ClassModel.id == class_id)
+    ).scalar_one_or_none()
+
+
 def create_class(
     db: Session,
     payload: ClassCreate,
@@ -48,9 +57,15 @@ def create_class(
 
 def get_classes(
     db: Session,
+    lecturer_id: UUID | None = None,
 ) -> list[ClassModel]:
+    query = select(ClassModel)
+
+    if lecturer_id is not None:
+        query = query.where(ClassModel.lecturer_id == lecturer_id)
+
+    query = query.order_by(ClassModel.created_at.desc())
+
     return list(
-        db.execute(
-            select(ClassModel).order_by(ClassModel.created_at.desc())
-        ).scalars().all()
+        db.execute(query).scalars().all()
     )
