@@ -25,7 +25,7 @@ from app.services.file_storage_service import validate_and_store_upload_file
 from app.services.job_service import run_submission_processing_pipeline
 from app.services.metadata_verification_service import verify_submission_metadata
 from app.services.reference_section_service import detect_and_save_reference_section
-from app.services.submission_service import create_submission_with_file_and_job, get_assignment_by_id
+from app.services.submission_service import create_submission_with_file_and_job, delete_submission, get_assignment_by_id
 
 
 router = APIRouter()
@@ -107,6 +107,47 @@ def analyze_submission_endpoint(
         "status": job.status,
         "progress": job.progress,
         "created_at": job.created_at,
+    }
+
+
+@router.delete("/{submission_id}", status_code=status.HTTP_200_OK)
+def delete_submission_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(SUBMISSION_UPLOAD)),
+):
+    submission = ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+    if submission.deleted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "SUBMISSION_NOT_FOUND",
+                "message": "Submission not found.",
+                "details": {"submission_id": str(submission_id)},
+            },
+        )
+
+    file_record = delete_submission(db=db, submission=submission)
+    record_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="DELETE_SUBMISSION",
+        resource_type="submission",
+        resource_id=str(submission.id),
+        message="Submission file deleted.",
+        details={"file_id": str(file_record.id) if file_record is not None else None},
+    )
+    db.commit()
+
+    return {
+        "message": "Submission deleted.",
+        "submission_id": str(submission.id),
+        "file_id": str(file_record.id) if file_record is not None else None,
     }
 
 @router.post(

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
@@ -11,8 +11,10 @@ from app.models.assignment import Assignment
 from app.models.file import File as FileModel
 from app.models.submission import Submission
 from app.schemas.class_schema import ClassCreate, ClassRead, ClassUpdate
+from app.services.audit_service import record_audit_log
 from app.services.class_service import (
     create_class,
+    delete_class,
     get_class_by_code,
     get_class_by_id,
     get_classes,
@@ -217,6 +219,40 @@ def update_class_endpoint(
     )
 
 
+@router.delete("/{class_identifier}", status_code=status.HTTP_200_OK)
+def delete_class_endpoint(
+    class_identifier: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
+):
+    classroom = _get_class_or_404(
+        db=db,
+        class_identifier=class_identifier,
+    )
+    _ensure_class_owner_or_admin(
+        classroom=classroom,
+        current_user=current_user,
+    )
+
+    summary = delete_class(db=db, classroom=classroom)
+    record_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action="DELETE_CLASS",
+        resource_type="class",
+        resource_id=str(classroom.id),
+        message="Class deleted.",
+        details=summary,
+    )
+    db.commit()
+
+    return {
+        "message": "Class deleted.",
+        "class_id": str(classroom.id),
+        **summary,
+    }
+
+
 @router.get("/{class_identifier}/submissions")
 def list_class_submissions_endpoint(
     class_identifier: str,
@@ -231,6 +267,9 @@ def list_class_submissions_endpoint(
         .join(Assignment, Submission.assignment_id == Assignment.id)
         .outerjoin(FileModel, Submission.file_id == FileModel.id)
         .where(Assignment.class_id == classroom.id)
+        .where(Assignment.deleted_at.is_(None))
+        .where(Submission.deleted_at.is_(None))
+        .where(or_(FileModel.id.is_(None), FileModel.is_deleted.is_(False)))
         .order_by(Submission.created_at.desc())
     ).all()
 

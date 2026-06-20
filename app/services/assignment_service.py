@@ -13,7 +13,10 @@ def get_class_by_id(
     class_id: UUID,
 ) -> ClassModel | None:
     return db.execute(
-        select(ClassModel).where(ClassModel.id == class_id)
+        select(ClassModel).where(
+            ClassModel.id == class_id,
+            ClassModel.deleted_at.is_(None),
+        )
     ).scalar_one_or_none()
 
 
@@ -26,6 +29,7 @@ def get_assignment_by_class_and_title(
         select(Assignment).where(
             Assignment.class_id == class_id,
             Assignment.title == title,
+            Assignment.deleted_at.is_(None),
         )
     ).scalar_one_or_none()
 
@@ -55,7 +59,10 @@ def get_assignment_by_id(
     assignment_id: UUID,
 ) -> Assignment | None:
     return db.execute(
-        select(Assignment).where(Assignment.id == assignment_id)
+        select(Assignment).where(
+            Assignment.id == assignment_id,
+            Assignment.deleted_at.is_(None),
+        )
     ).scalar_one_or_none()
 
 
@@ -83,6 +90,9 @@ def get_assignments(
     query = select(Assignment).join(
         ClassModel,
         Assignment.class_id == ClassModel.id,
+    ).where(
+        Assignment.deleted_at.is_(None),
+        ClassModel.deleted_at.is_(None),
     )
 
     if class_id is not None:

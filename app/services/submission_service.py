@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
@@ -8,6 +9,10 @@ from app.models.file import File as FileModel
 from app.models.processing_job import ProcessingJob
 from app.models.submission import Submission
 from app.services.file_storage_service import StoredFileData
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def get_assignment_by_id(
@@ -67,3 +72,24 @@ def create_submission_with_file_and_job(
     db.flush()
 
     return submission, db_file, job
+
+
+def delete_submission(
+    db: Session,
+    submission: Submission,
+) -> FileModel | None:
+    deleted_at = _utcnow()
+    file_record = db.execute(
+        select(FileModel).where(FileModel.id == submission.file_id)
+    ).scalar_one_or_none()
+
+    submission.deleted_at = deleted_at
+    submission.status = "DELETED"
+
+    if file_record is not None:
+        file_record.is_deleted = True
+        file_record.deleted_at = deleted_at
+
+    db.commit()
+
+    return file_record

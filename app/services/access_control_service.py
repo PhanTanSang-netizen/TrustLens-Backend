@@ -97,7 +97,10 @@ def ensure_class_access_or_admin(
     current_user: Any,
 ) -> ClassModel:
     classroom = db.execute(
-        select(ClassModel).where(ClassModel.id == class_id)
+        select(ClassModel).where(
+            ClassModel.id == class_id,
+            ClassModel.deleted_at.is_(None),
+        )
     ).scalar_one_or_none()
 
     if classroom is None:
@@ -125,7 +128,11 @@ def ensure_assignment_access_or_admin(
     row = db.execute(
         select(Assignment, ClassModel)
         .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(Assignment.id == assignment_id)
+        .where(
+            Assignment.id == assignment_id,
+            Assignment.deleted_at.is_(None),
+            ClassModel.deleted_at.is_(None),
+        )
     ).first()
 
     if row is None:
@@ -155,7 +162,12 @@ def ensure_submission_access_or_admin(
         select(Submission, ClassModel)
         .join(Assignment, Submission.assignment_id == Assignment.id)
         .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(Submission.id == submission_id)
+        .where(
+            Submission.id == submission_id,
+            Submission.deleted_at.is_(None),
+            Assignment.deleted_at.is_(None),
+            ClassModel.deleted_at.is_(None),
+        )
     ).first()
 
     if row is None:
