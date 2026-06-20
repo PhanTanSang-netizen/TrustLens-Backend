@@ -7,9 +7,10 @@ from app.api.deps import get_current_lecturer_or_admin
 from app.db.session import get_db
 from app.schemas.job_schema import (
     JobProcessResponse,
-    JobStatusResponse,
+    JobRead,
     LatestJobResponse,
 )
+from app.services.access_control_service import ensure_job_access_or_admin
 from app.services.job_service import (
     get_latest_job_by_submission_id,
     retry_submission_processing_job,
@@ -24,26 +25,13 @@ router = APIRouter()
 def read_job_status(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
-    job = get_job_by_id(
+    return ensure_job_access_or_admin(
         db=db,
         job_id=job_id,
+        current_user=current_user,
     )
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error_code": "JOB_NOT_FOUND",
-                "message": "Không tìm thấy job xử lý.",
-                "details": {
-                    "job_id": str(job_id),
-                },
-            },
-        )
-
-    return job
 
 
 @router.get(
@@ -83,21 +71,6 @@ def process_submission_pipeline(
         submission_id=submission_id,
         created_by=current_user.id,
     )
-    _enqueue_pipeline_if_needed(background_tasks, job)
-    return job
-
-
-@router.get("/{job_id}", response_model=JobRead)
-def read_job_status(
-    job_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
-):
-    return ensure_job_access_or_admin(
-        db=db,
-        job_id=job_id,
-        current_user=current_user,
-    )
 
 
 @router.post(
@@ -116,5 +89,3 @@ def retry_job(
         job_id=job_id,
         created_by=current_user.id,
     )
-    _enqueue_pipeline_if_needed(background_tasks, job)
-    return job

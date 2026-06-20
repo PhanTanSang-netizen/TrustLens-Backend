@@ -38,7 +38,7 @@ def get_submission_report_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    return get_submission_report(
+    return get_report_by_submission(
         db=db,
         submission_id=submission_id,
         current_user=current_user,
@@ -54,7 +54,7 @@ def generate_submission_report_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    return get_submission_report(
+    return get_report_by_submission(
         db=db,
         submission_id=submission_id,
         current_user=current_user,
