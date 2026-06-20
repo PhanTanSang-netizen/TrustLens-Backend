@@ -25,6 +25,13 @@ ACTIVE_JOB_STATUSES = {
     "BUILDING_REPORT",
 }
 
+NON_RETRYABLE_ERROR_PREFIXES = (
+    "FILE_",
+    "PDF_",
+    "NO_REFERENCE",
+    "UNSUPPORTED_FILE_TYPE",
+)
+
 
 def _model_has_field(field_name: str) -> bool:
     """

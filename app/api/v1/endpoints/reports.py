@@ -12,7 +12,7 @@ from app.services.export_service import (
     export_submission_report_to_pdf,
     export_submission_report_to_xlsx,
 )
-from app.services.report_service import get_submission_report
+from app.services.report_service import get_report_by_submission
 
 router = APIRouter()
 
@@ -38,15 +38,10 @@ def get_submission_report_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    ensure_submission_access_or_admin(
+    return get_report_by_submission(
         db=db,
         submission_id=submission_id,
         current_user=current_user,
-    )
-
-    return get_submission_report(
-        db=db,
-        submission_id=submission_id,
     )
 
 
@@ -59,15 +54,10 @@ def generate_submission_report_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    ensure_submission_access_or_admin(
+    return get_report_by_submission(
         db=db,
         submission_id=submission_id,
         current_user=current_user,
-    )
-
-    return get_submission_report(
-        db=db,
-        submission_id=submission_id,
     )
 
 
@@ -88,6 +78,7 @@ def export_submission_report_docx_endpoint(
     exported_file = export_submission_report_to_docx(
         db=db,
         submission_id=submission_id,
+        current_user=current_user,
     )
 
     return _build_file_response(exported_file)
@@ -110,6 +101,7 @@ def export_submission_report_pdf_endpoint(
     exported_file = export_submission_report_to_pdf(
         db=db,
         submission_id=submission_id,
+        current_user=current_user,
     )
 
     return _build_file_response(exported_file)
@@ -132,6 +124,7 @@ def export_submission_report_xlsx_endpoint(
     exported_file = export_submission_report_to_xlsx(
         db=db,
         submission_id=submission_id,
+        current_user=current_user,
     )
 
     return _build_file_response(exported_file)

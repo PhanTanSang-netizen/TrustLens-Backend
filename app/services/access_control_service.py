@@ -89,6 +89,18 @@ def ensure_class_access_or_admin(
     return classroom
 
 
+def ensure_class_access(
+    db: Session,
+    class_id: UUID,
+    current_user: Any,
+) -> ClassModel:
+    return ensure_class_access_or_admin(
+        db=db,
+        class_id=class_id,
+        current_user=current_user,
+    )
+
+
 def ensure_assignment_access_or_admin(
     db: Session,
     assignment_id: UUID,
@@ -122,6 +134,18 @@ def ensure_assignment_access_or_admin(
         )
 
     return assignment
+
+
+def ensure_assignment_access(
+    db: Session,
+    assignment_id: UUID,
+    current_user: Any,
+) -> Assignment:
+    return ensure_assignment_access_or_admin(
+        db=db,
+        assignment_id=assignment_id,
+        current_user=current_user,
+    )
 
 
 def ensure_submission_access_or_admin(
@@ -159,6 +183,92 @@ def ensure_submission_access_or_admin(
 
     return submission
 
+
+def get_accessible_submission_or_404(
+    db: Session,
+    submission_id: UUID,
+    user: Any,
+) -> Submission:
+    return ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=user,
+    )
+
+
+def get_accessible_report_or_404(
+    db: Session,
+    report_id: UUID,
+    user: Any,
+) -> Report:
+    row = db.execute(
+        select(Report, ClassModel)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(Report.id == report_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="report",
+            resource_id=report_id,
+            error_code="REPORT_NOT_FOUND",
+            message="Khong tim thay report.",
+        )
+
+    report, classroom = row
+
+    if is_admin(user):
+        return report
+
+    if str(classroom.lecturer_id) != str(getattr(user, "id", "")):
+        _raise_ownership_forbidden(
+            current_user=user,
+            owner_id=classroom.lecturer_id,
+            resource_name="report",
+            resource_id=report_id,
+        )
+
+    return report
+
+
+def get_accessible_export_or_404(
+    db: Session,
+    export_id: UUID,
+    user: Any,
+) -> ReportExport:
+    row = db.execute(
+        select(ReportExport, ClassModel)
+        .join(Report, ReportExport.report_id == Report.id)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(ReportExport.id == export_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="export",
+            resource_id=export_id,
+            error_code="EXPORT_NOT_FOUND",
+            message="Khong tim thay file export.",
+        )
+
+    report_export, classroom = row
+
+    if is_admin(user):
+        return report_export
+
+    if str(classroom.lecturer_id) != str(getattr(user, "id", "")):
+        _raise_ownership_forbidden(
+            current_user=user,
+            owner_id=classroom.lecturer_id,
+            resource_name="export",
+            resource_id=export_id,
+        )
+
+    return report_export
 
 def ensure_job_access_or_admin(
     db: Session,

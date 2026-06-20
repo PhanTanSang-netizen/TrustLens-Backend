@@ -8,10 +8,21 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: EmailStr
+    password: str
+
+
 class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str | None = None
     token_type: str = "bearer"
+    user: UserRead
+
+
+class RegisterResponse(BaseModel):
+    message: str
     user: UserRead
 
 

@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.security import verify_password
+from app.core.security import get_password_hash, verify_password
 from app.models.user import User
 
 
@@ -34,6 +34,24 @@ def authenticate_user(
     if not verify_password(password, user.password_hash):
         return None
 
+    return user
+
+
+def create_user(
+    db: Session,
+    email: str,
+    full_name: str,
+    password: str,
+) -> User:
+    user = User(
+        email=normalize_email(email),
+        full_name=full_name.strip(),
+        role="lecturer",
+        password_hash=get_password_hash(password),
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
     return user
 
 
