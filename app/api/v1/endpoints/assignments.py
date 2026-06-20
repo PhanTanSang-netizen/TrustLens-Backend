@@ -12,6 +12,7 @@ from app.services.assignment_service import (
     get_assignments,
     get_class_by_id,
 )
+from app.services.access_control_service import ensure_class_access
 
 
 router = APIRouter()

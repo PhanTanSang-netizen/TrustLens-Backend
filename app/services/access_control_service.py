@@ -3,7 +3,7 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.assignment import Assignment
 from app.models.class_model import ClassModel

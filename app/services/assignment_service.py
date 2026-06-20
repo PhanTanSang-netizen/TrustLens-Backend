@@ -59,6 +59,9 @@ def get_assignments(
         Assignment.class_id == ClassModel.id,
     )
 
+    if lecturer_id is not None:
+        query = query.join(ClassModel).where(ClassModel.lecturer_id == lecturer_id)
+
     if class_id is not None:
         query = query.where(Assignment.class_id == class_id)
 

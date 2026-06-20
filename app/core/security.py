@@ -93,6 +93,24 @@ def decode_access_token(
     if not token or not token.strip():
         return None
 
+def create_refresh_token(
+    subject: str,
+    role: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    expire = datetime.now(timezone.utc) + (
+        expires_delta if expires_delta is not None else timedelta(days=7)
+    )
+    payload: dict[str, Any] = {
+        "sub": subject,
+        "role": role,
+        "type": "refresh",
+        "exp": expire,
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict[str, Any] | None:
     try:
         payload = jwt.decode(
             token,
