@@ -47,16 +47,29 @@ def get_password_hash(
 def is_password_strong_enough(
     password: str,
 ) -> bool:
-    """
-    MVP password policy:
-    - Ít nhất 6 ký tự để không phá demo user hiện tại.
-    - Sau này production nên nâng lên 8–12 ký tự, có chữ hoa/thường/số/ký tự đặc biệt.
-    """
-
     if not password:
         return False
 
     return len(password) >= 6
+
+
+def _decode_token(token: str) -> dict[str, Any] | None:
+    if not token or not token.strip():
+        return None
+
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+        )
+    except JWTError:
+        return None
+
+    if payload.get("sub") is None:
+        return None
+
+    return payload
 
 
 def create_access_token(
@@ -87,49 +100,47 @@ def create_access_token(
     )
 
 
-def decode_access_token(
-    token: str,
-) -> dict[str, Any] | None:
-    if not token or not token.strip():
+def decode_access_token(token: str) -> dict[str, Any] | None:
+    payload = _decode_token(token)
+
+    if payload is None:
         return None
+
+    token_type = payload.get("type") or payload.get("token_type")
+
+    # Backward-compatible: old tokens without a type are accepted as access tokens.
+    if token_type is not None and token_type != "access":
+        return None
+
+    return payload
+
 
 def create_refresh_token(
     subject: str,
     role: str,
     expires_delta: timedelta | None = None,
 ) -> str:
-    expire = datetime.now(timezone.utc) + (
+    issued_at = utc_now()
+    expire = issued_at + (
         expires_delta if expires_delta is not None else timedelta(days=7)
     )
     payload: dict[str, Any] = {
-        "sub": subject,
-        "role": role,
+        "sub": str(subject),
+        "role": normalize_role(role),
         "type": "refresh",
+        "iat": issued_at,
         "exp": expire,
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def decode_access_token(token: str) -> dict[str, Any] | None:
-    try:
-        payload = jwt.decode(
-            token,
-            settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM],
-        )
+def decode_refresh_token(token: str) -> dict[str, Any] | None:
+    payload = _decode_token(token)
 
-        token_type = payload.get("type") or payload.get("token_type")
-
-        # Backward-compatible:
-        # Token cũ chưa có "type" vẫn được chấp nhận.
-        # Nếu token đã có type thì bắt buộc phải là access.
-        if token_type is not None and token_type != "access":
-            return None
-
-        if payload.get("sub") is None:
-            return None
-
-        return payload
-
-    except JWTError:
+    if payload is None:
         return None
+
+    if payload.get("type") != "refresh":
+        return None
+
+    return payload

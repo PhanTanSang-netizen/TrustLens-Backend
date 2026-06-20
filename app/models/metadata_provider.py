@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
@@ -63,9 +63,4 @@ class MetadataProvider(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
-    )
-
-    metadata_records = relationship(
-        "MetadataRecord",
-        back_populates="metadata_provider",
     )

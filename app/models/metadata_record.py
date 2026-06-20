@@ -31,23 +31,14 @@ class MetadataRecord(Base):
         index=True,
     )
 
-    metadata_provider_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("metadata_providers.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
     provider: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        default="URL_CHECK",
     )
 
     query_type: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        default="url",
     )
 
     query_value: Mapped[str | None] = mapped_column(
@@ -65,37 +56,7 @@ class MetadataRecord(Base):
         nullable=True,
     )
 
-    matched_authors: Mapped[dict | list | None] = mapped_column(
-        JSONB,
-        nullable=True,
-    )
-
     matched_year: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
-    )
-
-    matched_venue: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    matched_publisher: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    matched_doi: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    source_type: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    citation_signal: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )
@@ -103,31 +64,14 @@ class MetadataRecord(Base):
     verification_status: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
-        default="unknown",
     )
 
     confidence_score: Mapped[float] = mapped_column(
         Float,
         nullable=False,
-        default=0.0,
-    )
-
-    error_code: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    provider_latency_ms: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
     )
 
     raw_response: Mapped[dict | None] = mapped_column(
-        JSONB,
-        nullable=True,
-    )
-
-    normalized_response: Mapped[dict | None] = mapped_column(
         JSONB,
         nullable=True,
     )
@@ -145,10 +89,5 @@ class MetadataRecord(Base):
 
     citation = relationship(
         "Citation",
-        back_populates="metadata_records",
-    )
-
-    metadata_provider = relationship(
-        "MetadataProvider",
         back_populates="metadata_records",
     )

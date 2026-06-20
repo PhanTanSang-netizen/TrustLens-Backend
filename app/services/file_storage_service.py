@@ -20,6 +20,7 @@ class StoredFileData:
     stored_name: str
     stored_path: str
     mime_type: str
+    extension: str
     size_bytes: int
     checksum: str
 
@@ -112,6 +113,7 @@ async def validate_and_store_upload_file(
         stored_name=stored_name,
         stored_path=str(stored_path),
         mime_type=received_mime_type,
+        extension=suffix,
         size_bytes=len(content),
         checksum=checksum,
     )

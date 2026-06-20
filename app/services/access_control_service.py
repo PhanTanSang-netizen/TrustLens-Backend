@@ -11,12 +11,27 @@ from app.models.processing_job import ProcessingJob
 from app.models.report import Report, ReportExport
 from app.models.submission import Submission
 
+
 def get_user_role(current_user: Any) -> str:
     return str(getattr(current_user, "role", "")).strip().upper()
 
 
 def is_admin(current_user: Any) -> bool:
     return get_user_role(current_user) == "ADMIN"
+
+
+def _actor(current_user: Any | None = None, user: Any | None = None) -> Any:
+    resolved_user = current_user if current_user is not None else user
+    if resolved_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error_code": "AUTH_REQUIRED",
+                "message": "Authentication is required.",
+                "details": None,
+            },
+        )
+    return resolved_user
 
 
 def _raise_not_found(
@@ -47,7 +62,7 @@ def _raise_ownership_forbidden(
         status_code=status.HTTP_403_FORBIDDEN,
         detail={
             "error_code": "AUTH_OWNERSHIP_FORBIDDEN",
-            "message": "Bạn không có quyền truy cập tài nguyên không thuộc phạm vi của mình.",
+            "message": "You do not have permission to access this resource.",
             "details": {
                 "resource_type": resource_name,
                 "resource_id": str(resource_id),
@@ -56,6 +71,24 @@ def _raise_ownership_forbidden(
             },
         },
     )
+
+
+def _ensure_owner_or_admin(
+    current_user: Any,
+    owner_id: UUID | str | None,
+    resource_name: str,
+    resource_id: UUID,
+) -> None:
+    if is_admin(current_user):
+        return
+
+    if str(owner_id) != str(getattr(current_user, "id", "")):
+        _raise_ownership_forbidden(
+            current_user=current_user,
+            owner_id=owner_id,
+            resource_name=resource_name,
+            resource_id=resource_id,
+        )
 
 
 def ensure_class_access_or_admin(
@@ -72,33 +105,16 @@ def ensure_class_access_or_admin(
             resource_name="class",
             resource_id=class_id,
             error_code="CLASS_NOT_FOUND",
-            message="Không tìm thấy lớp học phần.",
+            message="Class not found.",
         )
 
-    if is_admin(current_user):
-        return classroom
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="class",
-            resource_id=class_id,
-        )
-
-    return classroom
-
-
-def ensure_class_access(
-    db: Session,
-    class_id: UUID,
-    current_user: Any,
-) -> ClassModel:
-    return ensure_class_access_or_admin(
-        db=db,
-        class_id=class_id,
+    _ensure_owner_or_admin(
         current_user=current_user,
+        owner_id=classroom.lecturer_id,
+        resource_name="class",
+        resource_id=class_id,
     )
+    return classroom
 
 
 def ensure_assignment_access_or_admin(
@@ -117,35 +133,17 @@ def ensure_assignment_access_or_admin(
             resource_name="assignment",
             resource_id=assignment_id,
             error_code="ASSIGNMENT_NOT_FOUND",
-            message="Không tìm thấy assignment cần thẩm định.",
+            message="Assignment not found.",
         )
 
     assignment, classroom = row
-
-    if is_admin(current_user):
-        return assignment
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="assignment",
-            resource_id=assignment_id,
-        )
-
-    return assignment
-
-
-def ensure_assignment_access(
-    db: Session,
-    assignment_id: UUID,
-    current_user: Any,
-) -> Assignment:
-    return ensure_assignment_access_or_admin(
-        db=db,
-        assignment_id=assignment_id,
+    _ensure_owner_or_admin(
         current_user=current_user,
+        owner_id=classroom.lecturer_id,
+        resource_name="assignment",
+        resource_id=assignment_id,
     )
+    return assignment
 
 
 def ensure_submission_access_or_admin(
@@ -165,110 +163,18 @@ def ensure_submission_access_or_admin(
             resource_name="submission",
             resource_id=submission_id,
             error_code="SUBMISSION_NOT_FOUND",
-            message="Không tìm thấy bài nộp.",
+            message="Submission not found.",
         )
 
     submission, classroom = row
-
-    if is_admin(current_user):
-        return submission
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="submission",
-            resource_id=submission_id,
-        )
-
+    _ensure_owner_or_admin(
+        current_user=current_user,
+        owner_id=classroom.lecturer_id,
+        resource_name="submission",
+        resource_id=submission_id,
+    )
     return submission
 
-
-def get_accessible_submission_or_404(
-    db: Session,
-    submission_id: UUID,
-    user: Any,
-) -> Submission:
-    return ensure_submission_access_or_admin(
-        db=db,
-        submission_id=submission_id,
-        current_user=user,
-    )
-
-
-def get_accessible_report_or_404(
-    db: Session,
-    report_id: UUID,
-    user: Any,
-) -> Report:
-    row = db.execute(
-        select(Report, ClassModel)
-        .join(Submission, Report.submission_id == Submission.id)
-        .join(Assignment, Submission.assignment_id == Assignment.id)
-        .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(Report.id == report_id)
-    ).first()
-
-    if row is None:
-        _raise_not_found(
-            resource_name="report",
-            resource_id=report_id,
-            error_code="REPORT_NOT_FOUND",
-            message="Khong tim thay report.",
-        )
-
-    report, classroom = row
-
-    if is_admin(user):
-        return report
-
-    if str(classroom.lecturer_id) != str(getattr(user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=user,
-            owner_id=classroom.lecturer_id,
-            resource_name="report",
-            resource_id=report_id,
-        )
-
-    return report
-
-
-def get_accessible_export_or_404(
-    db: Session,
-    export_id: UUID,
-    user: Any,
-) -> ReportExport:
-    row = db.execute(
-        select(ReportExport, ClassModel)
-        .join(Report, ReportExport.report_id == Report.id)
-        .join(Submission, Report.submission_id == Submission.id)
-        .join(Assignment, Submission.assignment_id == Assignment.id)
-        .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(ReportExport.id == export_id)
-    ).first()
-
-    if row is None:
-        _raise_not_found(
-            resource_name="export",
-            resource_id=export_id,
-            error_code="EXPORT_NOT_FOUND",
-            message="Khong tim thay file export.",
-        )
-
-    report_export, classroom = row
-
-    if is_admin(user):
-        return report_export
-
-    if str(classroom.lecturer_id) != str(getattr(user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=user,
-            owner_id=classroom.lecturer_id,
-            resource_name="export",
-            resource_id=export_id,
-        )
-
-    return report_export
 
 def ensure_job_access_or_admin(
     db: Session,
@@ -288,30 +194,84 @@ def ensure_job_access_or_admin(
             resource_name="job",
             resource_id=job_id,
             error_code="JOB_NOT_FOUND",
-            message="Không tìm thấy job xử lý.",
+            message="Processing job not found.",
         )
 
     job, classroom = row
-
-    if is_admin(current_user):
-        return job
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="job",
-            resource_id=job_id,
-        )
-
+    _ensure_owner_or_admin(
+        current_user=current_user,
+        owner_id=classroom.lecturer_id,
+        resource_name="job",
+        resource_id=job_id,
+    )
     return job
 
 
-# ---------------------------------------------------------------------
-# Compatibility wrappers
-# Các endpoint hiện tại có thể đang import tên ngắn như ensure_class_access.
-# Giữ wrapper để không phải sửa hàng loạt endpoint.
-# ---------------------------------------------------------------------
+def get_accessible_report_or_404(
+    db: Session,
+    report_id: UUID,
+    current_user: Any | None = None,
+    user: Any | None = None,
+) -> Report:
+    actor = _actor(current_user=current_user, user=user)
+    row = db.execute(
+        select(Report, ClassModel)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(Report.id == report_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="report",
+            resource_id=report_id,
+            error_code="REPORT_NOT_FOUND",
+            message="Report not found.",
+        )
+
+    report, classroom = row
+    _ensure_owner_or_admin(
+        current_user=actor,
+        owner_id=classroom.lecturer_id,
+        resource_name="report",
+        resource_id=report_id,
+    )
+    return report
+
+
+def get_accessible_export_or_404(
+    db: Session,
+    export_id: UUID,
+    current_user: Any | None = None,
+    user: Any | None = None,
+) -> ReportExport:
+    actor = _actor(current_user=current_user, user=user)
+    row = db.execute(
+        select(ReportExport, ClassModel)
+        .join(Report, ReportExport.report_id == Report.id)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(ReportExport.id == export_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="export",
+            resource_id=export_id,
+            error_code="REPORT_EXPORT_NOT_FOUND",
+            message="Report export not found.",
+        )
+
+    report_export, classroom = row
+    _ensure_owner_or_admin(
+        current_user=actor,
+        owner_id=classroom.lecturer_id,
+        resource_name="report_export",
+        resource_id=export_id,
+    )
+    return report_export
 
 
 def ensure_class_access(
@@ -361,141 +321,27 @@ def ensure_job_access(
         current_user=current_user,
     )
 
-def get_accessible_submission_or_404(
-    db: Session,
-    submission_id: UUID,
-    current_user: Any,
-) -> Submission:
-    """
-    Lấy submission nếu user có quyền truy cập.
-
-    Hàm này là alias/wrapper cho report_service.
-    Logic thật dùng lại ensure_submission_access_or_admin().
-    """
-
-    return ensure_submission_access_or_admin(
-        db=db,
-        submission_id=submission_id,
-        current_user=current_user,
-    )
-
-
-def get_accessible_report_or_404(
-    db: Session,
-    report_id: UUID,
-    current_user: Any,
-) -> Report:
-    """
-    Lấy report nếu user có quyền truy cập.
-
-    Quyền truy cập report được suy ra theo chuỗi:
-
-    report
-    → submission
-    → assignment
-    → class
-    → lecturer_id
-
-    Admin được truy cập tất cả.
-    Lecturer chỉ được truy cập report thuộc class mình phụ trách.
-    """
-
-    row = db.execute(
-        select(Report, ClassModel)
-        .join(Submission, Report.submission_id == Submission.id)
-        .join(Assignment, Submission.assignment_id == Assignment.id)
-        .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(Report.id == report_id)
-    ).first()
-
-    if row is None:
-        _raise_not_found(
-            resource_name="report",
-            resource_id=report_id,
-            error_code="REPORT_NOT_FOUND",
-            message="Không tìm thấy báo cáo thẩm định.",
-        )
-
-    report, classroom = row
-
-    if is_admin(current_user):
-        return report
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="report",
-            resource_id=report_id,
-        )
-
-    return report
-
 
 def ensure_report_access_or_admin(
     db: Session,
     report_id: UUID,
     current_user: Any,
 ) -> Report:
-    """
-    Alias tương thích nếu endpoint/service khác dùng tên ensure_*.
-    """
-
     return get_accessible_report_or_404(
         db=db,
         report_id=report_id,
         current_user=current_user,
     )
 
-def get_accessible_export_or_404(
+
+def get_accessible_submission_or_404(
     db: Session,
-    export_id: UUID,
-    current_user: Any,
-) -> ReportExport:
-    """
-    Lấy report export nếu user có quyền truy cập.
-
-    Quyền được suy ra theo chuỗi:
-
-    report_export
-    → report
-    → submission
-    → assignment
-    → class
-    → lecturer_id
-
-    Admin được truy cập tất cả.
-    Lecturer chỉ được truy cập export thuộc lớp mình phụ trách.
-    """
-
-    row = db.execute(
-        select(ReportExport, ClassModel)
-        .join(Report, ReportExport.report_id == Report.id)
-        .join(Submission, Report.submission_id == Submission.id)
-        .join(Assignment, Submission.assignment_id == Assignment.id)
-        .join(ClassModel, Assignment.class_id == ClassModel.id)
-        .where(ReportExport.id == export_id)
-    ).first()
-
-    if row is None:
-        _raise_not_found(
-            resource_name="export",
-            resource_id=export_id,
-            error_code="REPORT_EXPORT_NOT_FOUND",
-            message="Không tìm thấy file export báo cáo.",
-        )
-
-    report_export, classroom = row
-
-    if is_admin(current_user):
-        return report_export
-
-    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
-        _raise_ownership_forbidden(
-            current_user=current_user,
-            owner_id=classroom.lecturer_id,
-            resource_name="report_export",
-            resource_id=export_id,
-        )
-
-    return report_export
+    submission_id: UUID,
+    current_user: Any | None = None,
+    user: Any | None = None,
+) -> Submission:
+    return ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=_actor(current_user=current_user, user=user),
+    )

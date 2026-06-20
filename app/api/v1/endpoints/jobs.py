@@ -1,16 +1,20 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_lecturer_or_admin
+from app.api.deps import require_permissions
+from app.core.permissions import JOB_ANALYZE, REPORT_VIEW_OWN_SCOPE
 from app.db.session import get_db
 from app.schemas.job_schema import (
     JobProcessResponse,
-    JobRead,
+    JobStatusResponse,
     LatestJobResponse,
 )
-from app.services.access_control_service import ensure_job_access_or_admin
+from app.services.access_control_service import (
+    ensure_job_access_or_admin,
+    ensure_submission_access_or_admin,
+)
 from app.services.job_service import (
     create_queued_job,
     get_latest_job_by_submission_id,
@@ -22,19 +26,6 @@ from app.services.job_service import (
 router = APIRouter()
 
 
-@router.get("/{job_id}", response_model=JobRead)
-def read_job_status(
-    job_id: UUID,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
-):
-    return ensure_job_access_or_admin(
-        db=db,
-        job_id=job_id,
-        current_user=current_user,
-    )
-
-
 @router.get(
     "/submissions/{submission_id}/latest",
     response_model=LatestJobResponse,
@@ -42,8 +33,14 @@ def read_job_status(
 def read_latest_submission_job(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(REPORT_VIEW_OWN_SCOPE)),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
     job = get_latest_job_by_submission_id(
         db=db,
         submission_id=submission_id,
@@ -53,7 +50,7 @@ def read_latest_submission_job(
         return {
             "found": False,
             "submission_id": submission_id,
-            "message": "Không tìm thấy job xử lý cho bài nộp này.",
+            "message": "No processing job found for this submission.",
         }
 
     return job
@@ -68,7 +65,7 @@ def process_submission_pipeline(
     submission_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
     ensure_submission_access_or_admin(
         db=db,
@@ -99,12 +96,12 @@ def process_submission_pipeline(
 
 @router.get(
     "/{job_id}",
-    response_model=JobRead,
+    response_model=JobStatusResponse,
 )
 def read_job_status(
     job_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(REPORT_VIEW_OWN_SCOPE)),
 ):
     return ensure_job_access_or_admin(
         db=db,
@@ -122,7 +119,7 @@ def retry_job(
     job_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
     ensure_job_access_or_admin(
         db=db,

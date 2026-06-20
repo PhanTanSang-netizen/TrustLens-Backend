@@ -4,24 +4,20 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_lecturer_or_admin
+from app.api.deps import require_permissions
+from app.core.permissions import JOB_ANALYZE, SUBMISSION_UPLOAD
 from app.db.session import get_db
 from app.schemas.citation_schema import ParseCitationsResponse
 from app.schemas.job_schema import AnalyzeJobResponse
 from app.schemas.metadata_record_schema import VerifyMetadataResponse
 from app.schemas.reference_section_schema import DetectReferenceSectionResponse
-from app.schemas.submission_schema import SubmissionUploadResponse, AnalyzeSubmissionResponse, SubmissionRead
+from app.schemas.submission_schema import SubmissionUploadResponse
 from app.services.access_control_service import (
     ensure_assignment_access_or_admin,
     ensure_submission_access_or_admin,
 )
-from app.services.extraction_service import analyze_submission_text
-from app.services.file_storage_service import validate_and_store_upload_file
-from app.services.submission_service import create_submission_with_file_and_job
-
-from app.schemas.reference_section_schema import DetectReferenceSectionResponse
-from app.services.access_control_service import ensure_assignment_access, get_accessible_submission_or_404
 from app.services.analysis_pipeline_service import run_analysis_pipeline
+from app.services.job_service import create_queued_job
 from app.services.audit_service import record_audit_log
 from app.services.citation_service import parse_and_save_citations
 from app.services.file_storage_service import validate_and_store_upload_file
@@ -44,7 +40,7 @@ async def upload_submission_file(
     owner_label: str | None = Form(default=None),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(SUBMISSION_UPLOAD)),
 ):
     assignment = ensure_assignment_access_or_admin(
         db=db,
@@ -63,8 +59,17 @@ async def upload_submission_file(
         db.rollback()
         raise
 
+    db.refresh(db_file)
+    db.refresh(submission)
+    db.refresh(job)
+
     return {
-        "message": "Upload file thành công và đã lưu PostgreSQL.",
+        "message": "Upload file successfully.",
+        "id": submission.id,
+        "submission_id": submission.id,
+        "file_id": db_file.id,
+        "job_id": job.id,
+        "status": submission.status,
         "submission": submission,
         "file": db_file,
         "job": job,
@@ -80,16 +85,28 @@ def analyze_submission_endpoint(
     submission_id: UUID,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
-    job, extracted_document = analyze_submission_text(
+    ensure_submission_access_or_admin(
         db=db,
         submission_id=submission_id,
-        created_by=current_user.id,
+        current_user=current_user,
     )
-    if job.status == "QUEUED" and job.started_at is None:
-        background_tasks.add_task(run_analysis_pipeline, str(job.id))
-    return job
+
+    job = create_queued_job(
+        db=db,
+        submission_id=submission_id,
+        created_by=getattr(current_user, "id", None),
+    )
+    background_tasks.add_task(run_analysis_pipeline, str(job.id))
+
+    return {
+        "job_id": job.id,
+        "submission_id": job.submission_id,
+        "status": job.status,
+        "progress": job.progress,
+        "created_at": job.created_at,
+    }
 
 @router.post(
     "/{submission_id}/detect-references",
@@ -98,7 +115,7 @@ def analyze_submission_endpoint(
 def detect_reference_section_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
     ensure_submission_access_or_admin(
         db=db,
@@ -125,7 +142,7 @@ def detect_reference_section_endpoint(
 def parse_citations_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
     ensure_submission_access_or_admin(
         db=db,
@@ -154,14 +171,8 @@ def parse_citations_endpoint(
 def verify_metadata_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_permissions(JOB_ANALYZE)),
 ):
-    ensure_submission_access_or_admin(
-        db=db,
-        submission_id=submission_id,
-        current_user=current_user,
-    )
-    
     ensure_submission_access_or_admin(
         db=db,
         submission_id=submission_id,
@@ -318,4 +329,3 @@ def verify_metadata_endpoint(
         "job": job,
         "records": records,
     }
-

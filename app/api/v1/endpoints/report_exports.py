@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import require_permissions
+from app.core.permissions import REPORT_EXPORT
 from app.db.session import get_db
 from app.services.access_control_service import get_accessible_export_or_404
 
@@ -17,7 +18,7 @@ router = APIRouter()
 def download_report_export(
     export_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permissions(REPORT_EXPORT)),
 ):
     report_export = get_accessible_export_or_404(
         db=db,

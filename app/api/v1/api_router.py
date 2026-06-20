@@ -1,12 +1,15 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    admin,
     auth,
     assignments,
     classes,
     courses,
+    dashboard,
     health,
     jobs,
+    report_exports,
     reports,
     submissions,
     users,
@@ -40,6 +43,12 @@ api_router.include_router(
 )
 
 api_router.include_router(
+    dashboard.router,
+    prefix="/dashboard",
+    tags=["Dashboard"],
+)
+
+api_router.include_router(
     classes.router,
     prefix="/classes",
     tags=["Classes"],
@@ -67,4 +76,16 @@ api_router.include_router(
     reports.router,
     prefix="/reports",
     tags=["Reports"],
+)
+
+api_router.include_router(
+    report_exports.router,
+    prefix="/report-exports",
+    tags=["Report Exports"],
+)
+
+api_router.include_router(
+    admin.router,
+    prefix="/admin",
+    tags=["Admin"],
 )

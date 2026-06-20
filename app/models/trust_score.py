@@ -96,45 +96,24 @@ class CitationScore(Base):
         UUID(as_uuid=True),
         ForeignKey("citations.id", ondelete="CASCADE"),
         nullable=False,
+        unique=True,
         index=True,
     )
 
-    submission_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("submissions.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
+    scoring_config_version: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="trust-score-v1.0",
     )
 
-    format_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
-        nullable=False,
-    )
-
-    existence_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
-        nullable=False,
-    )
-
-    credibility_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
-        nullable=False,
-    )
-
-    recency_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
-        nullable=False,
-    )
-
-    relevance_score: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
-        nullable=False,
-    )
+    c1: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c2: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c3: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c4: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c5: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c6: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c7: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    c8: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
     reference_trust_score: Mapped[float] = mapped_column(
         Float,
@@ -148,24 +127,10 @@ class CitationScore(Base):
         nullable=False,
     )
 
-    label: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-    )
-
-    scoring_config_version: Mapped[str | None] = mapped_column(
-        String(50),
-        nullable=True,
-    )
-
-    explanation: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
-    )
-
-    details_json: Mapped[dict | None] = mapped_column(
+    explanations: Mapped[dict] = mapped_column(
         JSONB,
-        nullable=True,
+        default=dict,
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(

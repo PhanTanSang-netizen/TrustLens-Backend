@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -48,13 +48,13 @@ class Warning(Base):
         nullable=False,
     )
 
-    suggested_action: Mapped[str | None] = mapped_column(
+    recommendation: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
     )
 
-    confidence: Mapped[float | None] = mapped_column(
-        Float,
+    evidence: Mapped[dict | None] = mapped_column(
+        JSONB,
         nullable=True,
     )
 

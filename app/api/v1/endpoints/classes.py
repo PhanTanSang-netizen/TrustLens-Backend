@@ -1,12 +1,20 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import require_permissions
+from app.core.permissions import COURSE_MANAGE
 from app.db.session import get_db
+from app.models.assignment import Assignment
+from app.models.file import File as FileModel
+from app.models.submission import Submission
 from app.schemas.class_schema import ClassCreate, ClassRead
 from app.services.class_service import (
     create_class,
     get_class_by_code,
+    get_class_by_id,
     get_classes,
     get_course_by_id,
 )
@@ -40,10 +48,8 @@ def require_lecturer_or_admin(current_user) -> None:
 def create_class_endpoint(
     payload: ClassCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
 ):
-    require_lecturer_or_admin(current_user)
-
     course = get_course_by_id(
         db=db,
         course_id=payload.course_id,
@@ -88,10 +94,8 @@ def create_class_endpoint(
 @router.get("", response_model=list[ClassRead])
 def list_classes_endpoint(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
 ):
-    require_lecturer_or_admin(current_user)
-
     role = get_user_role(current_user)
 
     if role == "ADMIN":
@@ -101,3 +105,73 @@ def list_classes_endpoint(
         db=db,
         lecturer_id=current_user.id,
     )
+
+
+def _submission_status(score: float | None, status_value: str | None) -> str:
+    if score is None:
+        return "warning" if str(status_value or "").upper() not in {"FAILED", "REJECTED"} else "fail"
+    if score >= 80:
+        return "pass"
+    if score >= 50:
+        return "warning"
+    return "fail"
+
+
+@router.get("/{class_identifier}/submissions")
+def list_class_submissions_endpoint(
+    class_identifier: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
+):
+    classroom = None
+    try:
+        class_uuid = UUID(class_identifier)
+    except (ValueError, TypeError, AttributeError):
+        class_uuid = None
+
+    if class_uuid is not None:
+        classroom = get_class_by_id(db=db, class_id=class_uuid)
+
+    if classroom is None:
+        classroom = get_class_by_code(db=db, class_code=class_identifier)
+
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "CLASS_NOT_FOUND",
+                "message": "Class not found.",
+                "details": {"class_identifier": class_identifier},
+            },
+        )
+
+    if get_user_role(current_user) != "ADMIN" and str(classroom.lecturer_id) != str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "CLASS_OWNERSHIP_FORBIDDEN",
+                "message": "You do not have permission to access this class.",
+                "details": {"class_id": str(classroom.id)},
+            },
+        )
+
+    rows = db.execute(
+        select(Submission, FileModel)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .outerjoin(FileModel, Submission.file_id == FileModel.id)
+        .where(Assignment.class_id == classroom.id)
+        .order_by(Submission.created_at.desc())
+    ).all()
+
+    return [
+        {
+            "id": str(submission.id),
+            "studentName": submission.owner_label or "Student",
+            "fileName": file_record.original_name if file_record is not None else "N/A",
+            "date": submission.created_at.strftime("%d/%m/%Y"),
+            "trustScore": int(round(submission.overall_score or 0)),
+            "status": _submission_status(submission.overall_score, submission.status),
+            "classId": classroom.class_code,
+        }
+        for submission, file_record in rows
+    ]

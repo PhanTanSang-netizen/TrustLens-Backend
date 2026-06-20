@@ -3,20 +3,37 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
-    Paragraph,
-    SimpleDocTemplate,
-    Spacer,
-    Table,
-    TableStyle,
-)
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+except ModuleNotFoundError as exc:
+    REPORTLAB_IMPORT_ERROR = exc
+    colors = None
+    TA_LEFT = 0
+    A4 = (595.27, 841.89)
+    ParagraphStyle = Any
+    Paragraph = Any
+    SimpleDocTemplate = None
+    Spacer = Any
+    Table = Any
+    TableStyle = Any
+    cm = 28.3464567
+    pdfmetrics = None
+    TTFont = None
+else:
+    REPORTLAB_IMPORT_ERROR = None
 
 
 def _safe_text(value: Any) -> str:
@@ -300,6 +317,9 @@ def _add_citations(
 def build_pdf_report_bytes(
     report_data: dict[str, Any],
 ) -> bytes:
+    if REPORTLAB_IMPORT_ERROR is not None:
+        raise RuntimeError("reportlab is required to export PDF reports.") from REPORTLAB_IMPORT_ERROR
+
     buffer = BytesIO()
     styles = _build_styles()
 

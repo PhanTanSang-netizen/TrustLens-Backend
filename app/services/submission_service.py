@@ -31,9 +31,12 @@ def create_submission_with_file_and_job(
         stored_name=stored_file.stored_name,
         stored_path=stored_file.stored_path,
         mime_type=stored_file.mime_type,
+        extension=stored_file.extension,
         size_bytes=stored_file.size_bytes,
         checksum=stored_file.checksum,
         uploaded_by=uploaded_by,
+        storage_backend="local",
+        is_deleted=False,
     )
 
     db.add(db_file)
@@ -61,11 +64,6 @@ def create_submission_with_file_and_job(
     )
 
     db.add(job)
-
-    db.commit()
-
-    db.refresh(db_file)
-    db.refresh(submission)
-    db.refresh(job)
+    db.flush()
 
     return submission, db_file, job

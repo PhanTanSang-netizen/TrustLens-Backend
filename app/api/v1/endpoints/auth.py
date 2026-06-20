@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from app.core.security import (
     create_access_token,
     create_refresh_token,
-    decode_access_token,
+    decode_refresh_token,
     is_password_strong_enough,
+    utc_now,
 )
 from app.db.session import get_db
 from app.schemas.auth_schema import (
@@ -118,7 +119,7 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "error_code": "AUTH_INVALID_CREDENTIALS",
-                "message": "Email hoặc mật khẩu không đúng.",
+                "message": "Email ho?c m?t kh?u kh?ng ??ng.",
                 "details": None,
             },
         )
@@ -128,6 +129,7 @@ def login(
         role=user.role,
     )
     refresh_token = create_refresh_token(subject=str(user.id), role=user.role)
+    user.last_login_at = utc_now()
     record_audit_log(
         db=db,
         user_id=user.id,
@@ -150,7 +152,7 @@ def refresh_token(
     payload: RefreshRequest,
     db: Session = Depends(get_db),
 ):
-    token_payload = decode_access_token(payload.refresh_token)
+    token_payload = decode_refresh_token(payload.refresh_token)
     if token_payload is None or token_payload.get("type") != "refresh":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -171,3 +173,4 @@ def refresh_token(
             },
         )
     return {"access_token": create_access_token(subject=str(user.id), role=user.role), "token_type": "bearer"}
+

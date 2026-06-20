@@ -3,7 +3,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import require_permissions
+from app.core.permissions import ASSIGNMENT_MANAGE
 from app.db.session import get_db
 from app.schemas.assignment_schema import AssignmentCreate, AssignmentRead
 from app.services.assignment_service import (
@@ -67,10 +68,8 @@ def ensure_class_owner_or_admin(
 def create_assignment_endpoint(
     payload: AssignmentCreate,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permissions(ASSIGNMENT_MANAGE)),
 ):
-    require_lecturer_or_admin(current_user)
-
     classroom = get_class_by_id(
         db=db,
         class_id=payload.class_id,
@@ -122,10 +121,8 @@ def create_assignment_endpoint(
 def list_assignments_endpoint(
     class_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permissions(ASSIGNMENT_MANAGE)),
 ):
-    require_lecturer_or_admin(current_user)
-
     role = get_user_role(current_user)
 
     if class_id is not None:

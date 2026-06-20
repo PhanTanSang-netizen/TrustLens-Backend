@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -24,12 +24,6 @@ class ProcessingJob(Base):
         index=True,
     )
 
-    parent_job_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("processing_jobs.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
     status: Mapped[str] = mapped_column(
         String(50),
         default="QUEUED",
@@ -48,6 +42,23 @@ class ProcessingJob(Base):
         nullable=False,
     )
 
+    current_step: Mapped[str] = mapped_column(
+        String(100),
+        default="queued",
+        nullable=False,
+    )
+
+    report_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
+    retry_of_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("processing_jobs.id"),
+        nullable=True,
+    )
+
     error_code: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
@@ -58,14 +69,14 @@ class ProcessingJob(Base):
         nullable=True,
     )
 
-    retry_count: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
+    error_details: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
     )
 
-    worker_name: Mapped[str | None] = mapped_column(
-        String(255),
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
         nullable=True,
     )
 
@@ -99,5 +110,6 @@ class ProcessingJob(Base):
 
     parent_job = relationship(
         "ProcessingJob",
+        foreign_keys=[retry_of_job_id],
         remote_side=[id],
     )

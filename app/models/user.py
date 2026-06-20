@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.permissions import get_permissions_for_role
 from app.db.base import Base
 
 
@@ -84,11 +85,6 @@ class User(Base):
         back_populates="submitter",
     )
 
-    generated_reports = relationship(
-        "Report",
-        back_populates="generator",
-    )
-
     scoring_configs = relationship(
         "ScoringConfig",
         back_populates="creator",
@@ -98,3 +94,7 @@ class User(Base):
         "AuditLog",
         back_populates="actor",
     )
+
+    @property
+    def permissions(self) -> list[str]:
+        return get_permissions_for_role(self.role)

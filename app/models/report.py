@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -24,42 +24,65 @@ class Report(Base):
         index=True,
     )
 
-    generated_by: Mapped[uuid.UUID | None] = mapped_column(
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id"),
+        ForeignKey("processing_jobs.id"),
         nullable=True,
+        index=True,
     )
 
-    generated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
+    scoring_config_version: Mapped[str] = mapped_column(
+        String(100),
+        default="trust-score-v1.0",
         nullable=False,
     )
 
-    summary_json: Mapped[dict] = mapped_column(
-        JSONB,
+    report_trust_score: Mapped[float] = mapped_column(
+        Float,
+        default=0,
         nullable=False,
-        default=dict,
     )
 
-    export_paths: Mapped[dict | None] = mapped_column(
-        JSONB,
-        nullable=True,
+    confidence_score: Mapped[float] = mapped_column(
+        Float,
+        default=0,
+        nullable=False,
     )
 
-    config_version: Mapped[str | None] = mapped_column(
+    overall_label: Mapped[str] = mapped_column(
         String(50),
-        nullable=True,
+        default="needs_review",
+        nullable=False,
     )
 
-    disclaimer: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+    report_penalty: Mapped[float] = mapped_column(
+        Float,
+        default=0,
+        nullable=False,
     )
 
-    note: Mapped[str | None] = mapped_column(
-        Text,
-        nullable=True,
+    summary: Mapped[dict] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+
+    component_summary: Mapped[dict] = mapped_column(
+        JSONB,
+        default=dict,
+        nullable=False,
+    )
+
+    citations_payload: Mapped[list] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=False,
+    )
+
+    warnings: Mapped[list] = mapped_column(
+        JSONB,
+        default=list,
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -78,11 +101,6 @@ class Report(Base):
     submission = relationship(
         "Submission",
         back_populates="reports",
-    )
-
-    generator = relationship(
-        "User",
-        back_populates="generated_reports",
     )
 
     exports = relationship(
@@ -108,52 +126,26 @@ class ReportExport(Base):
         index=True,
     )
 
-    submission_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("submissions.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-
-    requested_by: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id"),
-        nullable=True,
-    )
-
-    export_format: Mapped[str] = mapped_column(
-        String(30),
+    format: Mapped[str] = mapped_column(
+        String(20),
+        default="pdf",
         nullable=False,
     )
 
-    file_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    stored_path: Mapped[str | None] = mapped_column(
+    storage_path: Mapped[str] = mapped_column(
         String(500),
-        nullable=True,
-    )
-
-    mime_type: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-    )
-
-    size_bytes: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
+        nullable=False,
     )
 
     status: Mapped[str] = mapped_column(
         String(50),
-        default="CREATED",
+        default="completed",
         nullable=False,
     )
 
-    error_message: Mapped[str | None] = mapped_column(
-        Text,
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
         nullable=True,
     )
 
@@ -163,20 +155,7 @@ class ReportExport(Base):
         nullable=False,
     )
 
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-    )
-
     report = relationship(
         "Report",
         back_populates="exports",
-    )
-
-    submission = relationship(
-        "Submission",
-    )
-
-    requester = relationship(
-        "User",
     )

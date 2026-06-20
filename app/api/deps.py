@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.permissions import has_any_permission
 from app.core.security import decode_access_token
 from app.db.session import get_db
 from app.services.auth_service import get_user_by_id
@@ -168,6 +169,31 @@ def require_roles(
     return dependency
 
 
+def require_permissions(
+    *permissions: str,
+) -> Callable:
+    required_permissions = tuple(permissions)
+
+    def dependency(
+        current_user=Depends(get_current_user),
+    ):
+        user_role = _get_user_role(current_user)
+
+        if not has_any_permission(user_role, required_permissions):
+            raise _permission_error(
+                error_code="AUTH_PERMISSION_FORBIDDEN",
+                message="Tài khoản không có quyền thực hiện chức năng này.",
+                details={
+                    "required_permissions": sorted(required_permissions),
+                    "current_role": user_role,
+                },
+            )
+
+        return current_user
+
+    return dependency
+
+
 def get_current_admin_user(
     current_user=Depends(require_roles("ADMIN")),
 ):
@@ -245,7 +271,7 @@ def ensure_owner_or_admin(
         )
     
 def require_admin(
-    current_user=Depends(get_current_lecturer_or_admin),
+    current_user=Depends(require_roles("ADMIN")),
 ):
     """
     Dependency kiểm tra quyền admin.

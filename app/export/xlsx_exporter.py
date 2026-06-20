@@ -3,14 +3,23 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
-from openpyxl.utils import get_column_letter
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+except ModuleNotFoundError as exc:
+    OPENPYXL_IMPORT_ERROR = exc
+    Workbook = Any
+    Alignment = Any
+    Font = Any
+    PatternFill = Any
+    get_column_letter = None
+else:
+    OPENPYXL_IMPORT_ERROR = None
 
 
-HEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
-SECTION_FILL = PatternFill("solid", fgColor="EEF5FF")
-
+HEADER_FILL = PatternFill("solid", fgColor="D9EAF7") if OPENPYXL_IMPORT_ERROR is None else None
+SECTION_FILL = PatternFill("solid", fgColor="EEF5FF") if OPENPYXL_IMPORT_ERROR is None else None
 
 def _safe_value(value: Any) -> Any:
     if value is None:
@@ -271,6 +280,9 @@ def _add_metadata_sheet(
 def build_xlsx_report_bytes(
     report_data: dict[str, Any],
 ) -> bytes:
+    if OPENPYXL_IMPORT_ERROR is not None:
+        raise RuntimeError("openpyxl is required to export XLSX reports.") from OPENPYXL_IMPORT_ERROR
+
     workbook = Workbook()
 
     _add_summary_sheet(
@@ -315,3 +327,4 @@ def generate_xlsx_report_filename(
     submission_id: str,
 ) -> str:
     return f"trustlens_report_{submission_id}_{uuid4().hex[:8]}.xlsx"
+

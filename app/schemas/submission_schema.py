@@ -21,6 +21,11 @@ class SubmissionRead(BaseModel):
 
 class SubmissionUploadResponse(BaseModel):
     message: str
+    id: UUID
+    submission_id: UUID
+    file_id: UUID
+    job_id: UUID
+    status: str
     submission: SubmissionRead
     file: FileRead
     job: JobRead

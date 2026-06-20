@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -35,29 +35,18 @@ class ReferenceSection(Base):
         nullable=False,
     )
 
-    start_offset: Mapped[int | None] = mapped_column(
+    start_index: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )
 
-    end_offset: Mapped[int | None] = mapped_column(
+    end_index: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )
 
-    start_page: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
-    )
-
-    end_page: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
-    )
-
-    confidence: Mapped[float] = mapped_column(
-        Float,
-        default=0.0,
+    detection_method: Mapped[str] = mapped_column(
+        String(50),
         nullable=False,
     )
 
