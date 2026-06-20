@@ -4,13 +4,22 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_lecturer_or_admin
 from app.db.session import get_db
 from app.schemas.citation_schema import ParseCitationsResponse
 from app.schemas.job_schema import AnalyzeJobResponse
 from app.schemas.metadata_record_schema import VerifyMetadataResponse
 from app.schemas.reference_section_schema import DetectReferenceSectionResponse
 from app.schemas.submission_schema import SubmissionUploadResponse
+from app.services.access_control_service import (
+    ensure_assignment_access_or_admin,
+    ensure_submission_access_or_admin,
+)
+from app.services.extraction_service import analyze_submission_text
+from app.services.file_storage_service import validate_and_store_upload_file
+from app.services.submission_service import create_submission_with_file_and_job
+
+from app.schemas.reference_section_schema import DetectReferenceSectionResponse
 from app.services.access_control_service import ensure_assignment_access, get_accessible_submission_or_404
 from app.services.analysis_pipeline_service import run_analysis_pipeline
 from app.services.audit_service import record_audit_log
@@ -25,20 +34,23 @@ from app.services.submission_service import create_submission_with_file_and_job,
 router = APIRouter()
 
 
-@router.post("/upload", response_model=SubmissionUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: str | None = Form(default=None), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    assignment = get_assignment_by_id(db=db, assignment_id=assignment_id)
-    if assignment is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={
-                "error_code": "ASSIGNMENT_NOT_FOUND",
-                "message": "Không tìm thấy assignment cần thẩm định.",
-                "details": {
-                    "assignment_id": str(assignment_id),
-                },
-            },
-        )
+@router.post(
+    "/upload",
+    response_model=SubmissionUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_submission_file(
+    assignment_id: UUID = Form(...),
+    owner_label: str | None = Form(default=None),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_lecturer_or_admin),
+):
+    assignment = ensure_assignment_access_or_admin(
+        db=db,
+        assignment_id=assignment_id,
+        current_user=current_user,
+    )
 
     if assignment.status != "OPEN":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error_code": "ASSIGNMENT_NOT_OPEN", "message": "Assignment is not open for upload.", "details": {"assignment_id": str(assignment_id), "status": assignment.status}})
@@ -66,8 +78,14 @@ async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: s
 def analyze_submission_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+    db=db,
+    submission_id=submission_id,
+    current_user=current_user,
+    )
+    
     job, extracted_document = analyze_submission_text(
         db=db,
         submission_id=submission_id,
@@ -87,8 +105,14 @@ def analyze_submission_endpoint(
 def detect_reference_section_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
     job, reference_section = detect_and_save_reference_section(
         db=db,
         submission_id=submission_id,
@@ -108,8 +132,14 @@ def detect_reference_section_endpoint(
 def parse_citations_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
     job, citations = parse_and_save_citations(
         db=db,
         submission_id=submission_id,
@@ -127,70 +157,171 @@ def parse_citations_endpoint(
     "/{submission_id}/verify-metadata",
     response_model=VerifyMetadataResponse,
 )
+
 def verify_metadata_endpoint(
     submission_id: UUID,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(get_current_lecturer_or_admin),
 ):
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+    
+    ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
     job, records = verify_submission_metadata(
         db=db,
         submission_id=submission_id,
     )
 
-    verified = len([
+    def count_by_status(
+        statuses: list[str],
+    ) -> int:
+        return len([
+            record
+            for record in records
+            if record.verification_status in statuses
+        ])
+
+    def get_academic_attempt_status(record) -> str | None:
+        raw_response = record.raw_response
+
+        if not isinstance(raw_response, dict):
+            return None
+
+        academic_attempt = raw_response.get("academic_match_attempt")
+
+        if not isinstance(academic_attempt, dict):
+            return None
+
+        status_value = academic_attempt.get("match_status")
+
+        if status_value is None:
+            return None
+
+        return str(status_value)
+
+    def count_academic_attempt_status(
+        statuses: list[str],
+    ) -> int:
+        return len([
+            record
+            for record in records
+            if get_academic_attempt_status(record) in statuses
+        ])
+
+    academic_verified = count_by_status([
+        "ACADEMIC_VERIFIED",
+    ])
+
+    academic_partial = count_by_status([
+        "ACADEMIC_PARTIAL_MATCH",
+    ])
+
+    academic_ambiguous = (
+        count_by_status([
+            "ACADEMIC_AMBIGUOUS",
+        ])
+        + count_academic_attempt_status([
+            "ACADEMIC_AMBIGUOUS",
+        ])
+    )
+
+    academic_not_found = (
+        count_by_status([
+            "ACADEMIC_NOT_FOUND",
+        ])
+        + count_academic_attempt_status([
+            "ACADEMIC_NOT_FOUND",
+        ])
+    )
+
+    academic_lookup_attempted = len([
         record
         for record in records
-        if record.verification_status in [
-            "URL_OK",
-            "DOI_OK",
+        if record.provider in [
+            "Crossref",
+            "OpenAlex",
         ]
+        or get_academic_attempt_status(record) is not None
     ])
 
-    basic_metadata_present = len([
-        record
-        for record in records
-        if record.verification_status == "BASIC_METADATA_PRESENT"
+    doi_ok = count_by_status([
+        "DOI_OK",
     ])
 
-    broken = len([
-        record
-        for record in records
-        if record.verification_status == "URL_BROKEN"
+    doi_unreachable = count_by_status([
+        "DOI_UNREACHABLE",
     ])
 
-    forbidden = len([
-        record
-        for record in records
-        if record.verification_status == "URL_FORBIDDEN"
+    url_ok = count_by_status([
+        "URL_OK",
     ])
 
-    unreachable = len([
-        record
-        for record in records
-        if record.verification_status in [
-            "URL_UNREACHABLE",
-            "DOI_UNREACHABLE",
-        ]
+    url_weak_evidence = count_by_status([
+        "URL_WEAK_EVIDENCE",
     ])
 
-    not_provided = len([
-        record
-        for record in records
-        if record.verification_status in [
-            "URL_NOT_PROVIDED",
-            "METADATA_NOT_PROVIDED",
-        ]
+    url_broken = count_by_status([
+        "URL_BROKEN",
     ])
+
+    url_forbidden = count_by_status([
+        "URL_FORBIDDEN",
+    ])
+
+    url_unreachable = count_by_status([
+        "URL_UNREACHABLE",
+    ])
+
+    basic_metadata_present = count_by_status([
+        "BASIC_METADATA_PRESENT",
+    ])
+
+    not_provided = count_by_status([
+        "URL_NOT_PROVIDED",
+        "METADATA_NOT_PROVIDED",
+    ])
+
+    # Legacy field:
+    # verified không còn tính URL_OK nữa.
+    # Vì URL_OK chỉ chứng minh link sống, không chứng minh tài liệu học thuật khớp.
+    verified = academic_verified + doi_ok
 
     return {
         "message": "Kiểm chứng metadata thành công.",
         "total": len(records),
+
         "verified": verified,
+
+        "academic_verified": academic_verified,
+        "academic_partial": academic_partial,
+        "academic_ambiguous": academic_ambiguous,
+        "academic_not_found": academic_not_found,
+        "academic_lookup_attempted": academic_lookup_attempted,
+
+        "doi_ok": doi_ok,
+        "doi_unreachable": doi_unreachable,
+        "url_ok": url_ok,
+        "url_weak_evidence": url_weak_evidence,
+        "url_broken": url_broken,
+        "url_forbidden": url_forbidden,
+        "url_unreachable": url_unreachable,
+
         "basic_metadata_present": basic_metadata_present,
-        "broken": broken,
-        "forbidden": forbidden,
-        "unreachable": unreachable,
+
+        # Legacy-compatible summary
+        "broken": url_broken,
+        "forbidden": url_forbidden,
+        "unreachable": url_unreachable + doi_unreachable,
         "not_provided": not_provided,
+
         "job": job,
         "records": records,
     }
