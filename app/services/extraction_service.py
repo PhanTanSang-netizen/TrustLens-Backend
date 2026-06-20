@@ -48,7 +48,9 @@ def analyze_submission_text(db: Session, submission_id: UUID) -> tuple[Processin
     db.flush()
     stored_path = Path(file_record.stored_path)
     try:
-        if stored_path.suffix.lower() == ".docx":
+        file_extension = stored_path.suffix.lower()
+
+        if file_extension == ".docx":
             extracted_result = extract_text_from_docx(str(stored_path))
         elif stored_path.suffix.lower() == ".pdf":
             extracted_result = extract_text_from_pdf(str(stored_path))

@@ -29,8 +29,17 @@ router = APIRouter()
 async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: str | None = Form(default=None), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     assignment = get_assignment_by_id(db=db, assignment_id=assignment_id)
     if assignment is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"error_code": "ASSIGNMENT_NOT_FOUND", "message": "Assignment not found.", "details": {"assignment_id": str(assignment_id)}})
-    ensure_assignment_access(current_user, assignment)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "ASSIGNMENT_NOT_FOUND",
+                "message": "Không tìm thấy assignment cần thẩm định.",
+                "details": {
+                    "assignment_id": str(assignment_id),
+                },
+            },
+        )
+
     if assignment.status != "OPEN":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error_code": "ASSIGNMENT_NOT_OPEN", "message": "Assignment is not open for upload.", "details": {"assignment_id": str(assignment_id), "status": assignment.status}})
     stored_file = await validate_and_store_upload_file(file)
@@ -41,60 +50,147 @@ async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: s
     except Exception:
         db.rollback()
         raise
-    return {"message": "Upload file completed.", "submission": submission, "file": db_file, "job": job}
 
-
-@router.post("/{submission_id}/analyze", response_model=AnalyzeJobResponse, status_code=status.HTTP_202_ACCEPTED)
-def analyze_submission_endpoint(submission_id: UUID, background_tasks: BackgroundTasks, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    submission = get_accessible_submission_or_404(db=db, submission_id=submission_id, user=current_user)
-    completed_report = get_report_by_submission_id(db=db, submission_id=submission.id)
-    if completed_report is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={"error_code": "ANALYSIS_ALREADY_COMPLETED", "message": "Submission already has a completed report.", "details": {"report_id": str(completed_report.id)}})
-    job = get_active_job_for_submission(db=db, submission_id=submission.id)
-    if job is None:
-        job = create_queued_job(db=db, submission_id=submission.id, created_by=current_user.id)
-    if job.status == "QUEUED" and job.started_at is None:
-        job.started_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(job)
-        background_tasks.add_task(run_analysis_pipeline, str(job.id))
-    record_audit_log(db=db, user_id=current_user.id, action="ANALYZE_SUBMISSION", resource_type="submission", resource_id=str(submission.id), message="Analysis job requested.", details={"job_id": str(job.id)})
-    db.commit()
-    return {"job_id": job.id, "submission_id": job.submission_id, "status": str(job.status).lower(), "progress": job.progress, "created_at": job.created_at}
-
-
-@router.get("/{submission_id}/report")
-def get_submission_report(submission_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    from app.services.report_service import get_report_by_submission
-    return get_report_by_submission(db=db, submission_id=submission_id, current_user=current_user)
-
-
-@router.post("/{submission_id}/detect-references", response_model=DetectReferenceSectionResponse)
-def detect_reference_section_endpoint(submission_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    get_accessible_submission_or_404(db=db, submission_id=submission_id, user=current_user)
-    job, reference_section = detect_and_save_reference_section(db=db, submission_id=submission_id)
-    return {"message": "Reference section detected.", "job": job, "reference_section": reference_section}
-
-
-@router.post("/{submission_id}/parse-citations", response_model=ParseCitationsResponse)
-def parse_citations_endpoint(submission_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    get_accessible_submission_or_404(db=db, submission_id=submission_id, user=current_user)
-    job, citations = parse_and_save_citations(db=db, submission_id=submission_id)
-    return {"message": "Citations parsed.", "total": len(citations), "job": job, "citations": citations}
-
-
-@router.post("/{submission_id}/verify-metadata", response_model=VerifyMetadataResponse)
-def verify_metadata_endpoint(submission_id: UUID, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    get_accessible_submission_or_404(db=db, submission_id=submission_id, user=current_user)
-    job, records = verify_submission_metadata(db=db, submission_id=submission_id)
     return {
-        "message": "Metadata verification completed.",
+        "message": "Upload file thành công và đã lưu PostgreSQL.",
+        "submission": submission,
+        "file": db_file,
+        "job": job,
+    }
+
+
+@router.post(
+    "/{submission_id}/analyze",
+    response_model=AnalyzeSubmissionResponse,
+)
+def analyze_submission_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, extracted_document = analyze_submission_text(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Trích xuất text từ tài liệu thành công.",
+        "job": job,
+        "extracted_document": extracted_document,
+    }
+
+
+@router.post(
+    "/{submission_id}/detect-references",
+    response_model=DetectReferenceSectionResponse,
+)
+def detect_reference_section_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, reference_section = detect_and_save_reference_section(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Nhận diện phần tài liệu tham khảo thành công.",
+        "job": job,
+        "reference_section": reference_section,
+    }
+
+
+@router.post(
+    "/{submission_id}/parse-citations",
+    response_model=ParseCitationsResponse,
+)
+def parse_citations_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, citations = parse_and_save_citations(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    return {
+        "message": "Tách citation thành công.",
+        "total": len(citations),
+        "job": job,
+        "citations": citations,
+    }
+
+
+@router.post(
+    "/{submission_id}/verify-metadata",
+    response_model=VerifyMetadataResponse,
+)
+def verify_metadata_endpoint(
+    submission_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    job, records = verify_submission_metadata(
+        db=db,
+        submission_id=submission_id,
+    )
+
+    verified = len([
+        record
+        for record in records
+        if record.verification_status in [
+            "URL_OK",
+            "DOI_OK",
+        ]
+    ])
+
+    basic_metadata_present = len([
+        record
+        for record in records
+        if record.verification_status == "BASIC_METADATA_PRESENT"
+    ])
+
+    broken = len([
+        record
+        for record in records
+        if record.verification_status == "URL_BROKEN"
+    ])
+
+    forbidden = len([
+        record
+        for record in records
+        if record.verification_status == "URL_FORBIDDEN"
+    ])
+
+    unreachable = len([
+        record
+        for record in records
+        if record.verification_status in [
+            "URL_UNREACHABLE",
+            "DOI_UNREACHABLE",
+        ]
+    ])
+
+    not_provided = len([
+        record
+        for record in records
+        if record.verification_status in [
+            "URL_NOT_PROVIDED",
+            "METADATA_NOT_PROVIDED",
+        ]
+    ])
+
+    return {
+        "message": "Kiểm chứng metadata thành công.",
         "total": len(records),
-        "verified": len([record for record in records if record.verification_status in {"verified", "URL_OK"}]),
-        "broken": len([record for record in records if record.verification_status in {"not_found", "URL_BROKEN"}]),
-        "forbidden": len([record for record in records if record.verification_status == "URL_FORBIDDEN"]),
-        "unreachable": len([record for record in records if record.verification_status in {"unknown", "URL_UNREACHABLE"}]),
-        "not_provided": len([record for record in records if record.verification_status == "URL_NOT_PROVIDED"]),
+        "verified": verified,
+        "basic_metadata_present": basic_metadata_present,
+        "broken": broken,
+        "forbidden": forbidden,
+        "unreachable": unreachable,
+        "not_provided": not_provided,
         "job": job,
         "records": records,
     }
