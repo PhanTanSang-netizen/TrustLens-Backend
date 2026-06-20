@@ -23,6 +23,18 @@ class Assignment(Base):
         nullable=False,
     )
 
+    scoring_config_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("scoring_configs.id"),
+        nullable=True,
+    )
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
@@ -44,10 +56,27 @@ class Assignment(Base):
         nullable=False,
     )
 
+    due_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     classroom = relationship(
@@ -58,4 +87,14 @@ class Assignment(Base):
     submissions = relationship(
         "Submission",
         back_populates="assignment",
+    )
+
+    scoring_config = relationship(
+        "ScoringConfig",
+        back_populates="assignments",
+    )
+
+    creator = relationship(
+        "User",
+        back_populates="created_assignments",
     )

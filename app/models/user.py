@@ -46,9 +46,21 @@ class User(Base):
         nullable=False,
     )
 
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )
 
@@ -60,4 +72,29 @@ class User(Base):
     uploaded_files = relationship(
         "File",
         back_populates="uploader",
+    )
+
+    created_assignments = relationship(
+        "Assignment",
+        back_populates="creator",
+    )
+
+    submitted_submissions = relationship(
+        "Submission",
+        back_populates="submitter",
+    )
+
+    generated_reports = relationship(
+        "Report",
+        back_populates="generator",
+    )
+
+    scoring_configs = relationship(
+        "ScoringConfig",
+        back_populates="creator",
+    )
+
+    audit_logs = relationship(
+        "AuditLog",
+        back_populates="actor",
     )

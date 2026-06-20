@@ -24,3 +24,9 @@ class SubmissionUploadResponse(BaseModel):
     submission: SubmissionRead
     file: FileRead
     job: JobRead
+
+class AnalyzeSubmissionResponse(BaseModel):
+    submission_id: UUID
+    job_id: UUID | None = None
+    status: str
+    message: str = "Submission analysis accepted."

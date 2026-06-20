@@ -1,0 +1,84 @@
+Backend root: D:\TrustLens\apps\backend
+Total modules checked: 136
+Total errors found: 3
+
+[ERROR 1]
+Module     : app.api.v1.api_router
+Error type : ImportError
+Message    : cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+--------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\TrustLens\apps\backend\tools\check_imports.py", line 34, in main
+    importlib.import_module(module_name)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python314\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1398, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1371, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1342, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 938, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 762, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "D:\TrustLens\apps\backend\app\api\v1\api_router.py", line 3, in <module>
+    from app.api.v1.endpoints import (
+    ...<9 lines>...
+    )
+  File "D:\TrustLens\apps\backend\app\api\v1\endpoints\reports.py", line 15, in <module>
+    from app.services.report_service import get_submission_report
+ImportError: cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+
+================================================================================
+
+[ERROR 2]
+Module     : app.api.v1.endpoints.reports
+Error type : ImportError
+Message    : cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+--------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\TrustLens\apps\backend\tools\check_imports.py", line 34, in main
+    importlib.import_module(module_name)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python314\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1398, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1371, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1342, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 938, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 762, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "D:\TrustLens\apps\backend\app\api\v1\endpoints\reports.py", line 15, in <module>
+    from app.services.report_service import get_submission_report
+ImportError: cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+
+================================================================================
+
+[ERROR 3]
+Module     : app.main
+Error type : ImportError
+Message    : cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+--------------------------------------------------------------------------------
+Traceback (most recent call last):
+  File "D:\TrustLens\apps\backend\tools\check_imports.py", line 34, in main
+    importlib.import_module(module_name)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "C:\Users\Lenovo\AppData\Local\Programs\Python\Python314\Lib\importlib\__init__.py", line 88, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<frozen importlib._bootstrap>", line 1398, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1371, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1342, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 938, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 762, in exec_module
+  File "<frozen importlib._bootstrap>", line 491, in _call_with_frames_removed
+  File "D:\TrustLens\apps\backend\app\main.py", line 5, in <module>
+    from app.api.v1.api_router import api_router
+  File "D:\TrustLens\apps\backend\app\api\v1\api_router.py", line 3, in <module>
+    from app.api.v1.endpoints import (
+    ...<9 lines>...
+    )
+ImportError: cannot import name 'get_submission_report' from 'app.services.report_service' (D:\TrustLens\apps\backend\app\services\report_service.py)
+
+================================================================================
+

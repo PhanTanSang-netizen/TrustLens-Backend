@@ -243,3 +243,29 @@ def ensure_owner_or_admin(
                 "owner_id": owner_id_text,
             },
         )
+    
+def require_admin(
+    current_user=Depends(get_current_lecturer_or_admin),
+):
+    """
+    Dependency kiểm tra quyền admin.
+
+    Dùng cho endpoint admin:
+    current_user = Depends(require_admin)
+    """
+
+    role = str(getattr(current_user, "role", "")).strip().lower()
+
+    if role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error_code": "AUTH_ADMIN_REQUIRED",
+                "message": "Bạn cần quyền admin để truy cập chức năng này.",
+                "details": {
+                    "current_role": role,
+                },
+            },
+        )
+
+    return current_user

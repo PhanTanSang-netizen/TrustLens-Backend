@@ -3,13 +3,13 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.models.assignment import Assignment
 from app.models.class_model import ClassModel
 from app.models.processing_job import ProcessingJob
+from app.models.report import Report, ReportExport
 from app.models.submission import Submission
-
 
 def get_user_role(current_user: Any) -> str:
     return str(getattr(current_user, "role", "")).strip().upper()
@@ -195,3 +195,197 @@ def ensure_job_access_or_admin(
         )
 
     return job
+
+
+# ---------------------------------------------------------------------
+# Compatibility wrappers
+# Các endpoint hiện tại có thể đang import tên ngắn như ensure_class_access.
+# Giữ wrapper để không phải sửa hàng loạt endpoint.
+# ---------------------------------------------------------------------
+
+
+def ensure_class_access(
+    db: Session,
+    class_id: UUID,
+    current_user: Any,
+) -> ClassModel:
+    return ensure_class_access_or_admin(
+        db=db,
+        class_id=class_id,
+        current_user=current_user,
+    )
+
+
+def ensure_assignment_access(
+    db: Session,
+    assignment_id: UUID,
+    current_user: Any,
+) -> Assignment:
+    return ensure_assignment_access_or_admin(
+        db=db,
+        assignment_id=assignment_id,
+        current_user=current_user,
+    )
+
+
+def ensure_submission_access(
+    db: Session,
+    submission_id: UUID,
+    current_user: Any,
+) -> Submission:
+    return ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+
+def ensure_job_access(
+    db: Session,
+    job_id: UUID,
+    current_user: Any,
+) -> ProcessingJob:
+    return ensure_job_access_or_admin(
+        db=db,
+        job_id=job_id,
+        current_user=current_user,
+    )
+
+def get_accessible_submission_or_404(
+    db: Session,
+    submission_id: UUID,
+    current_user: Any,
+) -> Submission:
+    """
+    Lấy submission nếu user có quyền truy cập.
+
+    Hàm này là alias/wrapper cho report_service.
+    Logic thật dùng lại ensure_submission_access_or_admin().
+    """
+
+    return ensure_submission_access_or_admin(
+        db=db,
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+
+def get_accessible_report_or_404(
+    db: Session,
+    report_id: UUID,
+    current_user: Any,
+) -> Report:
+    """
+    Lấy report nếu user có quyền truy cập.
+
+    Quyền truy cập report được suy ra theo chuỗi:
+
+    report
+    → submission
+    → assignment
+    → class
+    → lecturer_id
+
+    Admin được truy cập tất cả.
+    Lecturer chỉ được truy cập report thuộc class mình phụ trách.
+    """
+
+    row = db.execute(
+        select(Report, ClassModel)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(Report.id == report_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="report",
+            resource_id=report_id,
+            error_code="REPORT_NOT_FOUND",
+            message="Không tìm thấy báo cáo thẩm định.",
+        )
+
+    report, classroom = row
+
+    if is_admin(current_user):
+        return report
+
+    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
+        _raise_ownership_forbidden(
+            current_user=current_user,
+            owner_id=classroom.lecturer_id,
+            resource_name="report",
+            resource_id=report_id,
+        )
+
+    return report
+
+
+def ensure_report_access_or_admin(
+    db: Session,
+    report_id: UUID,
+    current_user: Any,
+) -> Report:
+    """
+    Alias tương thích nếu endpoint/service khác dùng tên ensure_*.
+    """
+
+    return get_accessible_report_or_404(
+        db=db,
+        report_id=report_id,
+        current_user=current_user,
+    )
+
+def get_accessible_export_or_404(
+    db: Session,
+    export_id: UUID,
+    current_user: Any,
+) -> ReportExport:
+    """
+    Lấy report export nếu user có quyền truy cập.
+
+    Quyền được suy ra theo chuỗi:
+
+    report_export
+    → report
+    → submission
+    → assignment
+    → class
+    → lecturer_id
+
+    Admin được truy cập tất cả.
+    Lecturer chỉ được truy cập export thuộc lớp mình phụ trách.
+    """
+
+    row = db.execute(
+        select(ReportExport, ClassModel)
+        .join(Report, ReportExport.report_id == Report.id)
+        .join(Submission, Report.submission_id == Submission.id)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(ReportExport.id == export_id)
+    ).first()
+
+    if row is None:
+        _raise_not_found(
+            resource_name="export",
+            resource_id=export_id,
+            error_code="REPORT_EXPORT_NOT_FOUND",
+            message="Không tìm thấy file export báo cáo.",
+        )
+
+    report_export, classroom = row
+
+    if is_admin(current_user):
+        return report_export
+
+    if str(classroom.lecturer_id) != str(getattr(current_user, "id", "")):
+        _raise_ownership_forbidden(
+            current_user=current_user,
+            owner_id=classroom.lecturer_id,
+            resource_name="report_export",
+            resource_id=export_id,
+        )
+
+    return report_export
