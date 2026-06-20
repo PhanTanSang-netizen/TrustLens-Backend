@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import case, func, select
@@ -131,3 +131,55 @@ def get_recent_activities(db: Session, lecturer_id: UUID | None = None, limit: i
             }
         )
     return activities
+
+
+def get_weekly_trend(db: Session, lecturer_id: UUID | None = None) -> list[dict]:
+    today = datetime.now(timezone.utc).date()
+    start_date = today - timedelta(days=6)
+
+    query = (
+        select(Submission)
+        .join(Assignment, Submission.assignment_id == Assignment.id)
+        .join(ClassModel, Assignment.class_id == ClassModel.id)
+        .where(Submission.created_at >= datetime.combine(start_date, datetime.min.time()).replace(tzinfo=timezone.utc))
+    )
+
+    if lecturer_id is not None:
+        query = query.where(ClassModel.lecturer_id == lecturer_id)
+
+    submissions = db.execute(query).scalars().all()
+    grouped: dict = {
+        start_date + timedelta(days=offset): {
+            "total": 0,
+            "passed": 0,
+        }
+        for offset in range(7)
+    }
+
+    for submission in submissions:
+        created_at = submission.created_at
+        if created_at is None:
+            continue
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+
+        bucket = created_at.date()
+        if bucket not in grouped:
+            continue
+
+        grouped[bucket]["total"] += 1
+        if _status_from_score(submission.overall_score, submission.status) == "pass":
+            grouped[bucket]["passed"] += 1
+
+    labels = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"]
+
+    return [
+        {
+            "date": day.isoformat(),
+            "label": labels[day.weekday()],
+            "total": values["total"],
+            "passed": values["passed"],
+            "rate": round((values["passed"] / values["total"]) * 100) if values["total"] else 0,
+        }
+        for day, values in grouped.items()
+    ]

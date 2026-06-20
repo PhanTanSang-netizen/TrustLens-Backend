@@ -33,6 +33,16 @@ def _get_export_root_dir() -> Path:
     return export_dir
 
 
+def _safe_file_part(value: str | None, fallback: str) -> str:
+    raw_value = str(value or fallback).strip()
+    safe_value = "".join(
+        char if char.isalnum() else "_"
+        for char in raw_value
+    )
+    safe_value = "_".join(part for part in safe_value.split("_") if part)
+    return (safe_value or fallback)[:80]
+
+
 def _get_latest_report_by_submission_id(
     db: Session,
     submission_id: UUID,
@@ -553,8 +563,12 @@ def create_report_export(
 
     export_dir = _get_export_root_dir()
 
+    submission = getattr(report, "submission", None)
+    owner_label = getattr(submission, "owner_label", None)
+    file_owner = _safe_file_part(owner_label, str(report.submission_id))
+
     file_name = (
-        f"trustlens_report_{report.submission_id}_"
+        f"trustlens_report_{file_owner}_"
         f"{datetime.now().strftime('%Y%m%d%H%M%S')}.{normalized_format}"
     )
 

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.class_model import ClassModel
 from app.models.course import Course
-from app.schemas.class_schema import ClassCreate
+from app.schemas.class_schema import ClassCreate, ClassUpdate
 
 
 def get_course_by_id(
@@ -69,3 +69,29 @@ def get_classes(
     return list(
         db.execute(query).scalars().all()
     )
+
+
+def update_class(
+    db: Session,
+    classroom: ClassModel,
+    payload: ClassUpdate,
+) -> ClassModel:
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if "class_code" in update_data and update_data["class_code"] is not None:
+        classroom.class_code = update_data["class_code"].strip().upper()
+
+    if "name" in update_data and update_data["name"] is not None:
+        classroom.name = update_data["name"].strip()
+
+    if "term_name" in update_data:
+        classroom.term_name = (
+            update_data["term_name"].strip()
+            if isinstance(update_data["term_name"], str)
+            else update_data["term_name"]
+        )
+
+    db.commit()
+    db.refresh(classroom)
+
+    return classroom

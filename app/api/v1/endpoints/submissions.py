@@ -5,6 +5,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permissions
+from app.core.enums.metadata_status import MetadataStatus, normalize_metadata_status
 from app.core.permissions import JOB_ANALYZE, SUBMISSION_UPLOAD
 from app.db.session import get_db
 from app.schemas.citation_schema import ParseCitationsResponse
@@ -184,67 +185,36 @@ def verify_metadata_endpoint(
         submission_id=submission_id,
     )
 
-    def count_by_status(
-        statuses: list[str],
-    ) -> int:
+    def count_by_status(statuses: list[MetadataStatus]) -> int:
         return len([
             record
             for record in records
-            if record.verification_status in statuses
+            if normalize_metadata_status(record.verification_status) in statuses
         ])
 
-    def get_academic_attempt_status(record) -> str | None:
-        raw_response = record.raw_response
-
-        if not isinstance(raw_response, dict):
-            return None
-
-        academic_attempt = raw_response.get("academic_match_attempt")
-
-        if not isinstance(academic_attempt, dict):
-            return None
-
-        status_value = academic_attempt.get("match_status")
-
-        if status_value is None:
-            return None
-
-        return str(status_value)
-
-    def count_academic_attempt_status(
-        statuses: list[str],
-    ) -> int:
+    def count_by_status_and_provider(statuses: list[MetadataStatus], providers: set[str]) -> int:
         return len([
             record
             for record in records
-            if get_academic_attempt_status(record) in statuses
+            if normalize_metadata_status(record.verification_status) in statuses
+            and record.provider in providers
         ])
 
     academic_verified = count_by_status([
-        "ACADEMIC_VERIFIED",
+        MetadataStatus.VERIFIED,
     ])
 
     academic_partial = count_by_status([
-        "ACADEMIC_PARTIAL_MATCH",
+        MetadataStatus.PARTIAL_MATCH,
     ])
 
-    academic_ambiguous = (
-        count_by_status([
-            "ACADEMIC_AMBIGUOUS",
-        ])
-        + count_academic_attempt_status([
-            "ACADEMIC_AMBIGUOUS",
-        ])
-    )
+    academic_ambiguous = count_by_status([
+        MetadataStatus.AMBIGUOUS,
+    ])
 
-    academic_not_found = (
-        count_by_status([
-            "ACADEMIC_NOT_FOUND",
-        ])
-        + count_academic_attempt_status([
-            "ACADEMIC_NOT_FOUND",
-        ])
-    )
+    academic_not_found = count_by_status([
+        MetadataStatus.NOT_FOUND,
+    ])
 
     academic_lookup_attempted = len([
         record
@@ -253,50 +223,46 @@ def verify_metadata_endpoint(
             "Crossref",
             "OpenAlex",
         ]
-        or get_academic_attempt_status(record) is not None
+        or (
+            isinstance(record.raw_response, dict)
+            and isinstance(record.raw_response.get("academic_match_attempt"), dict)
+        )
     ])
 
-    doi_ok = count_by_status([
-        "DOI_OK",
-    ])
+    doi_ok = count_by_status_and_provider([
+        MetadataStatus.URL_ONLY,
+    ], {"DOI_CHECK"})
 
-    doi_unreachable = count_by_status([
-        "DOI_UNREACHABLE",
-    ])
+    doi_unreachable = count_by_status_and_provider([
+        MetadataStatus.PROVIDER_UNAVAILABLE,
+    ], {"DOI_CHECK"})
 
-    url_ok = count_by_status([
-        "URL_OK",
-    ])
+    url_ok = count_by_status_and_provider([
+        MetadataStatus.URL_ONLY,
+    ], {"URL_CHECK"})
 
-    url_weak_evidence = count_by_status([
-        "URL_WEAK_EVIDENCE",
-    ])
+    url_weak_evidence = 0
 
-    url_broken = count_by_status([
-        "URL_BROKEN",
-    ])
+    url_broken = count_by_status_and_provider([
+        MetadataStatus.NOT_FOUND,
+    ], {"URL_CHECK"})
 
-    url_forbidden = count_by_status([
-        "URL_FORBIDDEN",
-    ])
+    url_forbidden = 0
 
-    url_unreachable = count_by_status([
-        "URL_UNREACHABLE",
-    ])
+    url_unreachable = count_by_status_and_provider([
+        MetadataStatus.PROVIDER_UNAVAILABLE,
+    ], {"URL_CHECK"})
 
-    basic_metadata_present = count_by_status([
-        "BASIC_METADATA_PRESENT",
-    ])
+    basic_metadata_present = 0
 
     not_provided = count_by_status([
-        "URL_NOT_PROVIDED",
-        "METADATA_NOT_PROVIDED",
+        MetadataStatus.NOT_FOUND,
     ])
 
     # Legacy field:
     # verified không còn tính URL_OK nữa.
     # Vì URL_OK chỉ chứng minh link sống, không chứng minh tài liệu học thuật khớp.
-    verified = academic_verified + doi_ok
+    verified = academic_verified
 
     return {
         "message": "Kiểm chứng metadata thành công.",

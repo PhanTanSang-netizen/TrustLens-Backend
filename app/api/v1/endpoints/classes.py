@@ -10,13 +10,14 @@ from app.db.session import get_db
 from app.models.assignment import Assignment
 from app.models.file import File as FileModel
 from app.models.submission import Submission
-from app.schemas.class_schema import ClassCreate, ClassRead
+from app.schemas.class_schema import ClassCreate, ClassRead, ClassUpdate
 from app.services.class_service import (
     create_class,
     get_class_by_code,
     get_class_by_id,
     get_classes,
     get_course_by_id,
+    update_class,
 )
 
 
@@ -117,11 +118,9 @@ def _submission_status(score: float | None, status_value: str | None) -> str:
     return "fail"
 
 
-@router.get("/{class_identifier}/submissions")
-def list_class_submissions_endpoint(
+def _get_class_or_404(
+    db: Session,
     class_identifier: str,
-    db: Session = Depends(get_db),
-    current_user=Depends(require_permissions(COURSE_MANAGE)),
 ):
     classroom = None
     try:
@@ -145,7 +144,14 @@ def list_class_submissions_endpoint(
             },
         )
 
-    if get_user_role(current_user) != "ADMIN" and str(classroom.lecturer_id) != str(current_user.id):
+    return classroom
+
+
+def _ensure_class_owner_or_admin(classroom, current_user) -> None:
+    if get_user_role(current_user) == "ADMIN":
+        return
+
+    if str(classroom.lecturer_id) != str(current_user.id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -154,6 +160,71 @@ def list_class_submissions_endpoint(
                 "details": {"class_id": str(classroom.id)},
             },
         )
+
+
+@router.put("/{class_identifier}", response_model=ClassRead)
+def update_class_endpoint(
+    class_identifier: str,
+    payload: ClassUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
+):
+    classroom = _get_class_or_404(
+        db=db,
+        class_identifier=class_identifier,
+    )
+    _ensure_class_owner_or_admin(
+        classroom=classroom,
+        current_user=current_user,
+    )
+
+    if payload.class_code is not None:
+        next_code = payload.class_code.strip().upper()
+        if not next_code:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error_code": "CLASS_CODE_REQUIRED",
+                    "message": "Mã lớp học phần không được để trống.",
+                    "details": None,
+                },
+            )
+        existing_class = get_class_by_code(db=db, class_code=next_code)
+        if existing_class is not None and str(existing_class.id) != str(classroom.id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error_code": "CLASS_CODE_EXISTS",
+                    "message": "Mã lớp học phần đã tồn tại.",
+                    "details": {"class_code": next_code},
+                },
+            )
+
+    if payload.name is not None and not payload.name.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error_code": "CLASS_NAME_REQUIRED",
+                "message": "Tên lớp học phần không được để trống.",
+                "details": None,
+            },
+        )
+
+    return update_class(
+        db=db,
+        classroom=classroom,
+        payload=payload,
+    )
+
+
+@router.get("/{class_identifier}/submissions")
+def list_class_submissions_endpoint(
+    class_identifier: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(COURSE_MANAGE)),
+):
+    classroom = _get_class_or_404(db=db, class_identifier=class_identifier)
+    _ensure_class_owner_or_admin(classroom=classroom, current_user=current_user)
 
     rows = db.execute(
         select(Submission, FileModel)

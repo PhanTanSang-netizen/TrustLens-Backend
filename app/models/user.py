@@ -95,6 +95,13 @@ class User(Base):
         back_populates="actor",
     )
 
+    profile = relationship(
+        "UserProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
     @property
     def permissions(self) -> list[str]:
         return get_permissions_for_role(self.role)

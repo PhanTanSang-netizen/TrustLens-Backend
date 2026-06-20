@@ -33,7 +33,7 @@ class Report(Base):
 
     scoring_config_version: Mapped[str] = mapped_column(
         String(100),
-        default="trust-score-v1.0",
+        default="trust-score-v1.1",
         nullable=False,
     )
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.models.processing_job import ProcessingJob
 from app.models.report import Report
+from app.core.trust_score_definition import build_trust_score_definition
 from app.services.access_control_service import (
     get_accessible_report_or_404,
     get_accessible_submission_or_404,
@@ -28,14 +29,20 @@ ACTIVE_REPORT_JOB_STATUSES = {
 
 
 def serialize_report(report: Report) -> dict:
+    submission = getattr(report, "submission", None)
+    owner_label = getattr(submission, "owner_label", None)
+
     return {
         "report_id": report.id,
         "submission_id": report.submission_id,
+        "owner_label": owner_label,
+        "student_name": owner_label,
         "job_id": report.job_id,
         "scoring_config_version": report.scoring_config_version,
-        "scoring_preset_name": "Default Trust Score",
-        "scoring_preset_code": "IT_GENERAL",
+        "scoring_preset_name": report.scoring_config_version,
+        "scoring_preset_code": report.scoring_config_version,
         "scoring_preset_version": 1,
+        "trust_score": build_trust_score_definition(version=report.scoring_config_version),
         "revision_number": 1,
         "report_trust_score": report.report_trust_score or 0,
         "confidence_score": report.confidence_score or 0,

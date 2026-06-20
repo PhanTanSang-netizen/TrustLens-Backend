@@ -5,6 +5,8 @@ import re
 import unicodedata
 from urllib.parse import urlparse
 
+from app.core.enums.metadata_status import MetadataStatus
+
 
 @dataclass
 class MetadataCandidate:
@@ -23,7 +25,7 @@ class MetadataCandidate:
 
 @dataclass
 class MetadataMatchResult:
-    match_status: str
+    match_status: MetadataStatus
     confidence_score: float
     provider: str
     source_url: str | None
@@ -36,6 +38,9 @@ class MetadataMatchResult:
     source_type: str
     credibility_explanation: str
     citation_signal: int | None
+    candidate_count: int
+    candidate_margin: float | None
+    evidence: dict[str, Any]
     raw_response: dict[str, Any] | None
 
 
@@ -405,9 +410,9 @@ def calculate_candidate_confidence(
     author_score = author_similarity(citation_authors, candidate.authors)
 
     confidence = (
-        title_score * 0.82
-        + year_score * 0.13
-        + author_score * 0.05
+        title_score * 0.75
+        + year_score * 0.15
+        + author_score * 0.10
     )
 
     if has_year_conflict(citation_year, candidate.year):
@@ -433,17 +438,26 @@ def calculate_candidate_confidence(
     return round(min(max(confidence, 0.0), 1.0), 4)
 
 
-def status_from_confidence(confidence_score: float) -> str:
+def status_from_confidence(
+    confidence_score: float,
+    candidate_margin: float | None = None,
+    doi_exact_match: bool = False,
+) -> MetadataStatus:
+    if doi_exact_match:
+        return MetadataStatus.VERIFIED
+
     if confidence_score >= 0.90:
-        return "ACADEMIC_VERIFIED"
+        if candidate_margin is not None and candidate_margin < 0.05:
+            return MetadataStatus.AMBIGUOUS
+        return MetadataStatus.VERIFIED
 
     if confidence_score >= 0.78:
-        return "ACADEMIC_PARTIAL_MATCH"
+        return MetadataStatus.PARTIAL_MATCH
 
     if confidence_score >= 0.65:
-        return "ACADEMIC_AMBIGUOUS"
+        return MetadataStatus.AMBIGUOUS
 
-    return "ACADEMIC_NOT_FOUND"
+    return MetadataStatus.NOT_FOUND
 
 
 def select_best_metadata_match(
@@ -471,6 +485,17 @@ def select_best_metadata_match(
     ranked.sort(key=lambda item: item[0], reverse=True)
 
     best_confidence, best_candidate = ranked[0]
+    second_confidence = ranked[1][0] if len(ranked) > 1 else None
+    candidate_margin = (
+        round(best_confidence - second_confidence, 4)
+        if second_confidence is not None
+        else None
+    )
+    doi_exact_match = bool(
+        normalize_doi(citation_doi)
+        and normalize_doi(best_candidate.doi)
+        and normalize_doi(citation_doi) == normalize_doi(best_candidate.doi)
+    )
 
     source_type = classify_source_type(
         metadata_type=best_candidate.source_type,
@@ -480,7 +505,11 @@ def select_best_metadata_match(
     )
 
     return MetadataMatchResult(
-        match_status=status_from_confidence(best_confidence),
+        match_status=status_from_confidence(
+            best_confidence,
+            candidate_margin=candidate_margin,
+            doi_exact_match=doi_exact_match,
+        ),
         confidence_score=best_confidence,
         provider=best_candidate.provider,
         source_url=best_candidate.source_url,
@@ -497,5 +526,17 @@ def select_best_metadata_match(
             confidence_score=best_confidence,
         ),
         citation_signal=best_candidate.citation_count,
+        candidate_count=len(ranked),
+        candidate_margin=candidate_margin,
+        evidence={
+            "title_similarity": title_similarity(citation_title, best_candidate.title),
+            "author_similarity": author_similarity(citation_authors, best_candidate.authors),
+            "year_similarity": year_similarity(citation_year, best_candidate.year),
+            "doi_exact_match": doi_exact_match,
+            "candidate_count": len(ranked),
+            "candidate_margin": candidate_margin,
+            "provider": best_candidate.provider,
+            "second_best_confidence": second_confidence,
+        },
         raw_response=best_candidate.raw_response,
     )

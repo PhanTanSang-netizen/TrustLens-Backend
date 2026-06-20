@@ -20,7 +20,7 @@ from app.processing.extraction.docx_extractor import extract_text_from_docx
 from app.processing.extraction.pdf_extractor import extract_text_from_pdf
 from app.processing.extraction.reference_detector import detect_reference_section
 from app.services.audit_service import record_audit_log
-from app.services.metadata_resolver_service import resolve_citation_metadata
+from app.services.metadata_verification_service import verify_citation_metadata
 from app.services.scoring_service import score_submission
 
 
@@ -65,7 +65,11 @@ def _get_context(db: Session, job_id: UUID) -> tuple[ProcessingJob, Submission, 
     job = db.execute(select(ProcessingJob).where(ProcessingJob.id == job_id)).scalar_one_or_none()
     if job is None:
         raise PipelineError("FAILED_INTERNAL", "JOB_NOT_FOUND", "Job no longer exists.")
-    submission = db.execute(select(Submission).options(joinedload(Submission.assignment)).where(Submission.id == job.submission_id)).scalar_one_or_none()
+    submission = db.execute(
+        select(Submission)
+        .options(joinedload(Submission.assignment).joinedload(Assignment.scoring_config))
+        .where(Submission.id == job.submission_id)
+    ).scalar_one_or_none()
     if submission is None:
         raise PipelineError("FAILED_INTERNAL", "SUBMISSION_NOT_FOUND", "Submission no longer exists.")
     file_record = db.execute(select(FileModel).where(FileModel.id == submission.file_id)).scalar_one_or_none()
@@ -92,6 +96,25 @@ def _extract(file_record: FileModel) -> tuple[str, int | None, int | None, str]:
     if not result.full_text.strip():
         raise PipelineError("FAILED_EXTRACTION", "PDF_HAS_NO_TEXT_LAYER" if stored_path.suffix.lower() == ".pdf" else "EXTRACTED_TEXT_EMPTY", "File has no extractable text. OCR is not supported in MVP.", {"page_count": result.page_count})
     return result.full_text, result.page_count, result.word_count, result.extraction_method
+
+
+def _build_report_context(full_text: str, reference_section: ReferenceSection, assignment: Assignment) -> dict:
+    before_references = full_text[: reference_section.start_index]
+    after_references = full_text[reference_section.end_index :]
+    body_text = f"{before_references}\n{after_references}".strip()
+    assignment_text = " ".join(part for part in [assignment.title, assignment.description] if part)
+    scoring_text = f"{assignment_text}\n{body_text}".strip()
+    return {
+        "assignment_title": assignment.title,
+        "assignment_description": assignment.description,
+        "body_text": body_text,
+        "scoring_text": scoring_text,
+        "excluded_reference_section": {
+            "start_index": reference_section.start_index,
+            "end_index": reference_section.end_index,
+            "heading": reference_section.heading,
+        },
+    }
 
 
 def run_analysis_pipeline(job_id: str) -> None:
@@ -154,8 +177,39 @@ def run_analysis_pipeline(job_id: str) -> None:
         db.execute(delete(MetadataRecord).where(MetadataRecord.submission_id == submission.id))
         metadata_records = []
         for index, citation in enumerate(citations, start=1):
-            resolved = resolve_citation_metadata(citation)
-            record = MetadataRecord(submission_id=submission.id, citation_id=citation.id, provider=resolved.provider, query_type=resolved.query_type, query_value=resolved.query_value, source_url=resolved.source_url, matched_title=resolved.matched_title, matched_year=resolved.matched_year, verification_status=resolved.verification_status, confidence_score=resolved.confidence_score, raw_response=resolved.raw_response)
+            resolved = verify_citation_metadata(citation)
+            record = MetadataRecord(
+                submission_id=submission.id,
+                citation_id=citation.id,
+                provider=resolved.provider,
+                query_type=resolved.query_type,
+                query_value=resolved.query_value,
+                source_url=resolved.source_url,
+                matched_title=resolved.matched_title,
+                matched_year=resolved.matched_year,
+                verification_status=resolved.status.value,
+                confidence_score=resolved.confidence_score,
+                raw_response={
+                    "citation_sequence_no": citation.sequence_no,
+                    "citation_title": citation.title,
+                    "citation_authors": citation.authors,
+                    "citation_year": citation.year,
+                    "citation_doi": citation.doi,
+                    "citation_url": citation.url,
+                    "matched_doi": resolved.matched_doi,
+                    "matched_authors": resolved.matched_authors,
+                    "abstract": resolved.abstract,
+                    "venue": resolved.venue,
+                    "publisher": resolved.publisher,
+                    "source_type": resolved.source_type,
+                    "citation_count": resolved.citation_count,
+                    "candidate_count": resolved.candidate_count,
+                    "candidate_margin": resolved.candidate_margin,
+                    "evidence": resolved.evidence,
+                    "provider_error": resolved.provider_error,
+                    "raw_provider_response": resolved.raw_response,
+                },
+            )
             db.add(record)
             metadata_records.append(record)
             job.progress = min(75, 60 + int(index / max(1, len(citations)) * 15))
@@ -166,7 +220,16 @@ def run_analysis_pipeline(job_id: str) -> None:
             db.refresh(record)
 
         _set_job_state(db, job, "SCORING", 80, "scoring")
-        scoring_result = score_submission(db=db, submission_id=submission.id, citations=citations, metadata_records=metadata_records, document_text=full_text, expected_style=assignment.required_style)
+        report_context = _build_report_context(full_text, reference_section, assignment)
+        scoring_result = score_submission(
+            db=db,
+            submission_id=submission.id,
+            citations=citations,
+            metadata_records=metadata_records,
+            report_context=report_context,
+            scoring_config=assignment.scoring_config,
+            expected_style=assignment.required_style,
+        )
         submission.overall_score = scoring_result["report_trust_score"]
         submission.status = "SCORED"
         db.commit()

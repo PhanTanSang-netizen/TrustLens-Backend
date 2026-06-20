@@ -1,4 +1,5 @@
 from app.models.user import User
+from app.models.user_profile import UserProfile
 from app.models.role_permission import RolePermission
 from app.models.course import Course
 from app.models.class_model import ClassModel
@@ -23,6 +24,7 @@ from app.models.audit_log import AuditLog
 
 __all__ = [
     "User",
+    "UserProfile",
     "RolePermission",
     "Course",
     "ClassModel",

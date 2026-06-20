@@ -61,7 +61,7 @@ def extract_url(text: str) -> str | None:
 
 def extract_doi(text: str) -> str | None:
     match = re.search(
-        r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b",
+        r"(?:https?://(?:dx\.)?doi\.org/|doi\s*:\s*)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)",
         text,
         re.IGNORECASE,
     )
@@ -69,7 +69,7 @@ def extract_doi(text: str) -> str | None:
     if not match:
         return None
 
-    return match.group(0).rstrip(".,;)")
+    return match.group(1).rstrip(".,;)")
 
 
 def detect_style(text: str) -> str:

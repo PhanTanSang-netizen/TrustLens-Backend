@@ -103,7 +103,7 @@ class CitationScore(Base):
     scoring_config_version: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
-        default="trust-score-v1.0",
+        default="trust-score-v1.1",
     )
 
     c1: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)

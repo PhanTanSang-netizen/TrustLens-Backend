@@ -13,6 +13,7 @@ class SubmissionReportResponse(BaseModel):
     scoring_preset_name: str | None = None
     scoring_preset_code: str | None = None
     scoring_preset_version: int | None = None
+    trust_score: dict[str, Any] | None = None
     revision_number: int | None = None
     report_trust_score: float
     confidence_score: float

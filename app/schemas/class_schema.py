@@ -11,6 +11,12 @@ class ClassCreate(BaseModel):
     term_name: str | None = None
 
 
+class ClassUpdate(BaseModel):
+    class_code: str | None = None
+    name: str | None = None
+    term_name: str | None = None
+
+
 class ClassRead(BaseModel):
     id: UUID
     course_id: UUID
