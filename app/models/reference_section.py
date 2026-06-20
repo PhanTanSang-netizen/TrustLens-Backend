@@ -1,8 +1,9 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -34,24 +35,44 @@ class ReferenceSection(Base):
         nullable=False,
     )
 
-    start_index: Mapped[int | None] = mapped_column(
+    start_offset: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )
 
-    end_index: Mapped[int | None] = mapped_column(
+    end_offset: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
     )
 
-    detection_method: Mapped[str] = mapped_column(
-        String(50),
+    start_page: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    end_page: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    confidence: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
         nullable=False,
-        default="heading_keyword",
     )
 
-    created_at: Mapped[DateTime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    submission = relationship(
+        "Submission",
+        back_populates="reference_section",
+    )
+
+    citations = relationship(
+        "Citation",
+        back_populates="reference_section",
     )

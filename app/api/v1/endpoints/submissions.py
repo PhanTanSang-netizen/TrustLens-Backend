@@ -10,7 +10,7 @@ from app.schemas.citation_schema import ParseCitationsResponse
 from app.schemas.job_schema import AnalyzeJobResponse
 from app.schemas.metadata_record_schema import VerifyMetadataResponse
 from app.schemas.reference_section_schema import DetectReferenceSectionResponse
-from app.schemas.submission_schema import SubmissionUploadResponse
+from app.schemas.submission_schema import SubmissionUploadResponse, AnalyzeSubmissionResponse, SubmissionRead
 from app.services.access_control_service import (
     ensure_assignment_access_or_admin,
     ensure_submission_access_or_admin,

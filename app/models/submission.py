@@ -29,6 +29,12 @@ class Submission(Base):
         nullable=False,
     )
 
+    submitted_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+
     owner_label: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
@@ -45,10 +51,37 @@ class Submission(Base):
         nullable=True,
     )
 
+    overall_label: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    latest_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
+
+    analyzed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     assignment = relationship(
@@ -61,12 +94,50 @@ class Submission(Base):
         back_populates="submission",
     )
 
+    submitter = relationship(
+        "User",
+        back_populates="submitted_submissions",
+    )
+
     processing_jobs = relationship(
         "ProcessingJob",
+        back_populates="submission",
+    )
+
+    extracted_document = relationship(
+        "ExtractedDocument",
+        back_populates="submission",
+        uselist=False,
+    )
+
+    reference_section = relationship(
+        "ReferenceSection",
+        back_populates="submission",
+        uselist=False,
+    )
+
+    citations = relationship(
+        "Citation",
+        back_populates="submission",
+    )
+
+    metadata_records = relationship(
+        "MetadataRecord",
         back_populates="submission",
     )
 
     reports = relationship(
         "Report",
         back_populates="submission",
+    )
+
+    warnings = relationship(
+        "Warning",
+        back_populates="submission",
+    )
+
+    trust_score = relationship(
+        "TrustScore",
+        back_populates="submission",
+        uselist=False,
     )

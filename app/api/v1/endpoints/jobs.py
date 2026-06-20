@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_lecturer_or_admin
@@ -12,6 +12,7 @@ from app.schemas.job_schema import (
 )
 from app.services.access_control_service import ensure_job_access_or_admin
 from app.services.job_service import (
+    create_queued_job,
     get_latest_job_by_submission_id,
     retry_submission_processing_job,
     run_submission_processing_pipeline,
@@ -48,11 +49,14 @@ def read_latest_submission_job(
         submission_id=submission_id,
     )
 
-    return {
-        "message": "Latest submission job fetched successfully.",
-        "submission_id": submission_id,
-        "job": job,
-    }
+    if job is None:
+        return {
+            "found": False,
+            "submission_id": submission_id,
+            "message": "Không tìm thấy job xử lý cho bài nộp này.",
+        }
+
+    return job
 
 
 @router.post(
@@ -66,10 +70,46 @@ def process_submission_pipeline(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    return run_submission_processing_pipeline(
+    ensure_submission_access_or_admin(
         db=db,
         submission_id=submission_id,
-        created_by=current_user.id,
+        current_user=current_user,
+    )
+
+    job = create_queued_job(
+        db=db,
+        submission_id=submission_id,
+        created_by=getattr(current_user, "id", None),
+    )
+
+    background_tasks.add_task(
+        run_submission_processing_pipeline,
+        job_id=job.id,
+    )
+
+    return {
+        "job_id": job.id,
+        "submission_id": job.submission_id,
+        "status": job.status,
+        "progress": job.progress,
+        "step": job.step,
+        "message": "Processing job accepted.",
+    }
+
+
+@router.get(
+    "/{job_id}",
+    response_model=JobRead,
+)
+def read_job_status(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_lecturer_or_admin),
+):
+    return ensure_job_access_or_admin(
+        db=db,
+        job_id=job_id,
+        current_user=current_user,
     )
 
 
@@ -84,8 +124,28 @@ def retry_job(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_lecturer_or_admin),
 ):
-    return retry_submission_processing_job(
+    ensure_job_access_or_admin(
         db=db,
         job_id=job_id,
-        created_by=current_user.id,
+        current_user=current_user,
     )
+
+    job = retry_submission_processing_job(
+        db=db,
+        job_id=job_id,
+        current_user=current_user,
+    )
+
+    background_tasks.add_task(
+        run_submission_processing_pipeline,
+        job_id=job.id,
+    )
+
+    return {
+        "job_id": job.id,
+        "submission_id": job.submission_id,
+        "status": job.status,
+        "progress": job.progress,
+        "step": job.step,
+        "message": "Retry job accepted.",
+    }
