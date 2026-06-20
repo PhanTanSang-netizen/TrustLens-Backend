@@ -1,47 +1,33 @@
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.db.session import get_db
-from app.schemas.extracted_document_schema import AnalyzeSubmissionResponse
-from app.schemas.submission_schema import SubmissionUploadResponse
-from app.services.extraction_service import analyze_submission_text
-from app.services.file_storage_service import validate_and_store_upload_file
-from app.services.submission_service import (
-    create_submission_with_file_and_job,
-    get_assignment_by_id,
-)
-
-from app.schemas.reference_section_schema import DetectReferenceSectionResponse
-from app.services.reference_section_service import detect_and_save_reference_section
 from app.schemas.citation_schema import ParseCitationsResponse
-from app.services.citation_service import parse_and_save_citations
-
+from app.schemas.job_schema import AnalyzeJobResponse
 from app.schemas.metadata_record_schema import VerifyMetadataResponse
+from app.schemas.reference_section_schema import DetectReferenceSectionResponse
+from app.schemas.submission_schema import SubmissionUploadResponse
+from app.services.access_control_service import ensure_assignment_access, get_accessible_submission_or_404
+from app.services.analysis_pipeline_service import run_analysis_pipeline
+from app.services.audit_service import record_audit_log
+from app.services.citation_service import parse_and_save_citations
+from app.services.file_storage_service import validate_and_store_upload_file
+from app.services.job_service import create_queued_job, get_active_job_for_submission, get_report_by_submission_id
 from app.services.metadata_verification_service import verify_submission_metadata
+from app.services.reference_section_service import detect_and_save_reference_section
+from app.services.submission_service import create_submission_with_file_and_job, get_assignment_by_id
+
 
 router = APIRouter()
 
 
-@router.post(
-    "/upload",
-    response_model=SubmissionUploadResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def upload_submission_file(
-    assignment_id: UUID = Form(...),
-    owner_label: str | None = Form(default=None),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    assignment = get_assignment_by_id(
-        db=db,
-        assignment_id=assignment_id,
-    )
-
+@router.post("/upload", response_model=SubmissionUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_submission_file(assignment_id: UUID = Form(...), owner_label: str | None = Form(default=None), file: UploadFile = File(...), db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+    assignment = get_assignment_by_id(db=db, assignment_id=assignment_id)
     if assignment is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -55,28 +41,12 @@ async def upload_submission_file(
         )
 
     if assignment.status != "OPEN":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error_code": "ASSIGNMENT_NOT_OPEN",
-                "message": "Assignment hiện không mở để upload.",
-                "details": {
-                    "assignment_id": str(assignment_id),
-                    "status": assignment.status,
-                },
-            },
-        )
-
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error_code": "ASSIGNMENT_NOT_OPEN", "message": "Assignment is not open for upload.", "details": {"assignment_id": str(assignment_id), "status": assignment.status}})
     stored_file = await validate_and_store_upload_file(file)
-
     try:
-        submission, db_file, job = create_submission_with_file_and_job(
-            db=db,
-            assignment_id=assignment_id,
-            owner_label=owner_label,
-            stored_file=stored_file,
-            uploaded_by=current_user.id,
-        )
+        submission, db_file, job = create_submission_with_file_and_job(db=db, assignment_id=assignment_id, owner_label=owner_label, stored_file=stored_file, uploaded_by=current_user.id)
+        record_audit_log(db=db, user_id=current_user.id, action="UPLOAD_SUBMISSION", resource_type="submission", resource_id=str(submission.id), message="Submission file uploaded.", details={"assignment_id": str(assignment_id), "file_id": str(db_file.id)})
+        db.commit()
     except Exception:
         db.rollback()
         raise

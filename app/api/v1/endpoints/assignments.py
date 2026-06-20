@@ -12,6 +12,7 @@ from app.services.assignment_service import (
     get_assignments,
     get_class_by_id,
 )
+from app.services.access_control_service import ensure_class_access
 
 
 router = APIRouter()
@@ -39,6 +40,8 @@ def create_assignment_endpoint(
                 },
             },
         )
+
+    ensure_class_access(current_user, classroom)
 
     existing_assignment = get_assignment_by_class_and_title(
         db=db,
@@ -71,7 +74,13 @@ def list_assignments_endpoint(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    if class_id is not None:
+        classroom = get_class_by_id(db=db, class_id=class_id)
+        if classroom is not None:
+            ensure_class_access(current_user, classroom)
+
     return get_assignments(
         db=db,
         class_id=class_id,
+        lecturer_id=None if current_user.role == "admin" else current_user.id,
     )
