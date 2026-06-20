@@ -45,7 +45,7 @@ def _serialize_user(
         "full_name": user.full_name,
         "role": user.role,
         "is_active": user.is_active,
-        "permissions": user.permissions,
+        "permissions": user.permissions or [],
         "university": getattr(profile, "university", None),
         "faculty": getattr(profile, "faculty", None),
         "major": getattr(profile, "major", None),

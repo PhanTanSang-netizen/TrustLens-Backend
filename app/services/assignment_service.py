@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.models.assignment import Assignment
 from app.models.class_model import ClassModel
-from app.schemas.assignment_schema import AssignmentCreate
+from app.schemas.assignment_schema import AssignmentCreate, AssignmentUpdate
 
 
 def get_class_by_id(
@@ -40,9 +40,35 @@ def create_assignment(
         description=payload.description,
         required_style=payload.required_style,
         status=payload.status,
+        due_date=payload.due_date,
     )
 
     db.add(assignment)
+    db.commit()
+    db.refresh(assignment)
+
+    return assignment
+
+
+def get_assignment_by_id(
+    db: Session,
+    assignment_id: UUID,
+) -> Assignment | None:
+    return db.execute(
+        select(Assignment).where(Assignment.id == assignment_id)
+    ).scalar_one_or_none()
+
+
+def update_assignment(
+    db: Session,
+    assignment: Assignment,
+    payload: AssignmentUpdate,
+) -> Assignment:
+    update_data = payload.model_dump(exclude_unset=True)
+
+    for field, value in update_data.items():
+        setattr(assignment, field, value)
+
     db.commit()
     db.refresh(assignment)
 

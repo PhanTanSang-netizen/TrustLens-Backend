@@ -17,6 +17,13 @@ class MetadataStatusTests(unittest.TestCase):
     def test_url_ok_maps_to_url_only(self) -> None:
         self.assertEqual(normalize_metadata_status("URL_OK"), MetadataStatus.URL_ONLY)
 
+    def test_doi_conflict_maps_to_identifier_metadata_conflict(self) -> None:
+        self.assertEqual(normalize_metadata_status("DOI_CONFLICT"), MetadataStatus.IDENTIFIER_METADATA_CONFLICT)
+        self.assertEqual(
+            normalize_metadata_status("IDENTIFIER_METADATA_CONFLICT"),
+            MetadataStatus.IDENTIFIER_METADATA_CONFLICT,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

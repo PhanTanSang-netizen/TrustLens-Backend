@@ -1,0 +1,9 @@
+from enum import StrEnum
+
+
+class PublicationStatus(StrEnum):
+    RETRACTED = "RETRACTED"
+    EXPRESSION_OF_CONCERN = "EXPRESSION_OF_CONCERN"
+    CORRECTED = "CORRECTED"
+    ACTIVE_OR_NO_SIGNAL = "ACTIVE_OR_NO_SIGNAL"
+    UNKNOWN = "UNKNOWN"

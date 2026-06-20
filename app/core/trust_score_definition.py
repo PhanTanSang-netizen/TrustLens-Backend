@@ -1,4 +1,7 @@
-SCORING_VERSION = "trust-score-v1.1"
+import os
+
+
+SCORING_VERSION = os.getenv("TRUST_SCORE_VERSION", "trust-score-v1.2")
 
 DEFAULT_WEIGHTS = {
     "c1_completeness": 10,
@@ -114,6 +117,6 @@ def build_trust_score_definition(
         "limitations": [
             "Trust Score is a screening and review-support score, not a proof of scientific correctness.",
             "NOT_FOUND means metadata was not found in configured providers; it does not prove that a source is fake.",
-            "Relevance depends on extracted report text and available title/abstract metadata.",
+            "Relevance depends on extracted report text, available title/abstract metadata, provider status, and calibration profile.",
         ],
     }

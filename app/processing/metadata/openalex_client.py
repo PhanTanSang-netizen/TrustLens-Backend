@@ -1,8 +1,8 @@
-import os
 from typing import Any
 
 import httpx
 
+from app.core.config import settings
 from app.processing.metadata.metadata_matcher import MetadataCandidate
 
 
@@ -91,6 +91,40 @@ def _openalex_work_to_candidate(
     )
 
 
+def lookup_openalex_by_doi(
+    doi: str | None,
+    timeout: float = 10.0,
+) -> MetadataCandidate | None:
+    if not doi:
+        return None
+
+    params: dict[str, Any] = {}
+    api_key = settings.OPENALEX_API_KEY
+    if api_key:
+        params["api_key"] = api_key
+
+    normalized = str(doi).replace("https://doi.org/", "").strip()
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            response = client.get(
+                f"{OPENALEX_BASE_URL}/works/doi:{normalized}",
+                params=params,
+                headers={
+                    "User-Agent": "TrustLens/1.2",
+                    "Accept": "application/json",
+                },
+            )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        data = response.json()
+        if not isinstance(data, dict):
+            return None
+        return _openalex_work_to_candidate(data)
+    except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
+        return None
+
+
 def search_openalex_by_title(
     title: str | None,
     year: int | None = None,
@@ -108,7 +142,7 @@ def search_openalex_by_title(
     if year:
         params["filter"] = f"publication_year:{year}"
 
-    api_key = os.getenv("OPENALEX_API_KEY")
+    api_key = settings.OPENALEX_API_KEY
 
     if api_key:
         params["api_key"] = api_key

@@ -1,12 +1,23 @@
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from app.core.config import settings
 from app.processing.metadata.metadata_matcher import MetadataCandidate
 
 
 CROSSREF_BASE_URL = "https://api.crossref.org"
+
+
+@dataclass
+class ProviderLookupResult:
+    status: str
+    provider: str
+    http_status: int | None
+    data: MetadataCandidate | None
+    error_code: str | None
 
 
 def _first_text(value: Any) -> str | None:
@@ -102,24 +113,54 @@ def lookup_crossref_by_doi(
     doi: str,
     timeout: float = 10.0,
 ) -> MetadataCandidate | None:
+    result = lookup_crossref_by_doi_result(doi=doi, timeout=timeout)
+    return result.data if result.status == "SUCCESS" else None
+
+
+def lookup_crossref_by_doi_result(
+    doi: str,
+    timeout: float = 10.0,
+) -> ProviderLookupResult:
     if not doi:
-        return None
+        return ProviderLookupResult(
+            status="INVALID_RESPONSE",
+            provider="Crossref",
+            http_status=None,
+            data=None,
+            error_code="DOI_EMPTY",
+        )
 
     encoded_doi = quote(doi.strip(), safe="")
     url = f"{CROSSREF_BASE_URL}/works/{encoded_doi}"
+    mailto = settings.CROSSREF_MAILTO
 
     try:
         with httpx.Client(timeout=timeout) as client:
             response = client.get(
                 url,
                 headers={
-                    "User-Agent": "TrustLens-MVP/1.0 (mailto:trustlens@example.com)",
+                    "User-Agent": f"TrustLens/1.2 (mailto:{mailto})",
                     "Accept": "application/json",
                 },
             )
 
         if response.status_code == 404:
-            return None
+            return ProviderLookupResult(
+                status="NOT_FOUND",
+                provider="Crossref",
+                http_status=404,
+                data=None,
+                error_code=None,
+            )
+
+        if response.status_code == 429:
+            return ProviderLookupResult(
+                status="RATE_LIMITED",
+                provider="Crossref",
+                http_status=429,
+                data=None,
+                error_code="HTTP_429",
+            )
 
         response.raise_for_status()
 
@@ -127,12 +168,46 @@ def lookup_crossref_by_doi(
         message = data.get("message")
 
         if not isinstance(message, dict):
-            return None
+            return ProviderLookupResult(
+                status="INVALID_RESPONSE",
+                provider="Crossref",
+                http_status=response.status_code,
+                data=None,
+                error_code="MESSAGE_MISSING",
+            )
 
-        return _crossref_message_to_candidate(message)
+        return ProviderLookupResult(
+            status="SUCCESS",
+            provider="Crossref",
+            http_status=response.status_code,
+            data=_crossref_message_to_candidate(message),
+            error_code=None,
+        )
 
-    except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
-        return None
+    except httpx.HTTPStatusError as exc:
+        return ProviderLookupResult(
+            status="UNAVAILABLE",
+            provider="Crossref",
+            http_status=exc.response.status_code,
+            data=None,
+            error_code=f"HTTP_{exc.response.status_code}",
+        )
+    except httpx.RequestError as exc:
+        return ProviderLookupResult(
+            status="UNAVAILABLE",
+            provider="Crossref",
+            http_status=None,
+            data=None,
+            error_code=exc.__class__.__name__,
+        )
+    except ValueError:
+        return ProviderLookupResult(
+            status="INVALID_RESPONSE",
+            provider="Crossref",
+            http_status=None,
+            data=None,
+            error_code="JSON_DECODE_FAILED",
+        )
 
 
 def search_crossref_by_title(
@@ -158,7 +233,7 @@ def search_crossref_by_title(
                 f"{CROSSREF_BASE_URL}/works",
                 params=params,
                 headers={
-                    "User-Agent": "TrustLens-MVP/1.0 (mailto:trustlens@example.com)",
+                    "User-Agent": f"TrustLens/1.2 (mailto:{settings.CROSSREF_MAILTO})",
                     "Accept": "application/json",
                 },
             )

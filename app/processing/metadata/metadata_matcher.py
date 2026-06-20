@@ -397,10 +397,6 @@ def calculate_candidate_confidence(
     input_doi = normalize_doi(citation_doi)
     candidate_doi = normalize_doi(candidate.doi)
 
-    # DOI exact match là bằng chứng mạnh nhất.
-    if input_doi and candidate_doi and input_doi == candidate_doi:
-        return 0.98
-
     # Nếu citation có DOI nhưng candidate trả DOI khác, không được xem là match.
     if input_doi and candidate_doi and input_doi != candidate_doi:
         return 0.0
@@ -414,6 +410,30 @@ def calculate_candidate_confidence(
         + year_score * 0.15
         + author_score * 0.10
     )
+
+    doi_exact_match = bool(input_doi and candidate_doi and input_doi == candidate_doi)
+    if doi_exact_match:
+        if is_identifier_metadata_partial(
+            citation_title=citation_title,
+            candidate_title=candidate.title,
+            citation_authors=citation_authors,
+            candidate_authors=candidate.authors,
+        ):
+            return 0.78
+        if has_identifier_metadata_hard_conflict(
+            title_score=title_score,
+            author_score=author_score,
+            citation_year=citation_year,
+            candidate_year=candidate.year,
+        ):
+            return 0.44
+        if has_identifier_metadata_soft_conflict(
+            title_score=title_score,
+            citation_year=citation_year,
+            candidate_year=candidate.year,
+        ):
+            return 0.82
+        return 0.98
 
     if has_year_conflict(citation_year, candidate.year):
         confidence -= 0.25
@@ -438,11 +458,57 @@ def calculate_candidate_confidence(
     return round(min(max(confidence, 0.0), 1.0), 4)
 
 
+def year_difference(input_year: int | None, candidate_year: int | None) -> int | None:
+    if input_year is None or candidate_year is None:
+        return None
+    return abs(int(input_year) - int(candidate_year))
+
+
+def has_identifier_metadata_hard_conflict(
+    title_score: float,
+    author_score: float,
+    citation_year: int | None,
+    candidate_year: int | None,
+) -> bool:
+    diff = year_difference(citation_year, candidate_year)
+    return (
+        title_score < 0.65
+        or (author_score < 0.20 and title_score < 0.90)
+        or (diff is not None and diff > 3)
+    )
+
+
+def has_identifier_metadata_soft_conflict(
+    title_score: float,
+    citation_year: int | None,
+    candidate_year: int | None,
+) -> bool:
+    diff = year_difference(citation_year, candidate_year)
+    return 0.65 <= title_score < 0.80 or (diff is not None and 2 <= diff <= 3)
+
+
+def is_identifier_metadata_partial(
+    citation_title: str | None,
+    candidate_title: str | None,
+    citation_authors: str | None,
+    candidate_authors: str | None,
+) -> bool:
+    return not citation_title or not candidate_title or not citation_authors or not candidate_authors
+
+
 def status_from_confidence(
     confidence_score: float,
     candidate_margin: float | None = None,
     doi_exact_match: bool = False,
+    identifier_metadata_conflict: bool = False,
+    identifier_metadata_partial: bool = False,
 ) -> MetadataStatus:
+    if identifier_metadata_conflict:
+        return MetadataStatus.IDENTIFIER_METADATA_CONFLICT
+
+    if identifier_metadata_partial:
+        return MetadataStatus.PARTIAL_MATCH
+
     if doi_exact_match:
         return MetadataStatus.VERIFIED
 
@@ -484,6 +550,15 @@ def select_best_metadata_match(
 
     ranked.sort(key=lambda item: item[0], reverse=True)
 
+    input_doi = normalize_doi(citation_doi)
+    exact_doi_ranked = [
+        item
+        for item in ranked
+        if input_doi and normalize_doi(item[1].doi) == input_doi
+    ]
+    if exact_doi_ranked:
+        ranked = exact_doi_ranked + [item for item in ranked if item not in exact_doi_ranked]
+
     best_confidence, best_candidate = ranked[0]
     second_confidence = ranked[1][0] if len(ranked) > 1 else None
     candidate_margin = (
@@ -495,6 +570,28 @@ def select_best_metadata_match(
         normalize_doi(citation_doi)
         and normalize_doi(best_candidate.doi)
         and normalize_doi(citation_doi) == normalize_doi(best_candidate.doi)
+    )
+    best_title_similarity = title_similarity(citation_title, best_candidate.title)
+    best_author_similarity = author_similarity(citation_authors, best_candidate.authors)
+    best_year_difference = year_difference(citation_year, best_candidate.year)
+    identifier_metadata_partial = bool(
+        doi_exact_match
+        and is_identifier_metadata_partial(
+            citation_title=citation_title,
+            candidate_title=best_candidate.title,
+            citation_authors=citation_authors,
+            candidate_authors=best_candidate.authors,
+        )
+    )
+    identifier_metadata_conflict = bool(
+        doi_exact_match
+        and not identifier_metadata_partial
+        and has_identifier_metadata_hard_conflict(
+            title_score=best_title_similarity,
+            author_score=best_author_similarity,
+            citation_year=citation_year,
+            candidate_year=best_candidate.year,
+        )
     )
 
     source_type = classify_source_type(
@@ -509,6 +606,8 @@ def select_best_metadata_match(
             best_confidence,
             candidate_margin=candidate_margin,
             doi_exact_match=doi_exact_match,
+            identifier_metadata_conflict=identifier_metadata_conflict,
+            identifier_metadata_partial=identifier_metadata_partial,
         ),
         confidence_score=best_confidence,
         provider=best_candidate.provider,
@@ -529,10 +628,17 @@ def select_best_metadata_match(
         candidate_count=len(ranked),
         candidate_margin=candidate_margin,
         evidence={
-            "title_similarity": title_similarity(citation_title, best_candidate.title),
-            "author_similarity": author_similarity(citation_authors, best_candidate.authors),
+            "title_similarity": best_title_similarity,
+            "author_similarity": best_author_similarity,
             "year_similarity": year_similarity(citation_year, best_candidate.year),
+            "year_difference": best_year_difference,
             "doi_exact_match": doi_exact_match,
+            "identifier_existence": "FOUND" if doi_exact_match else "UNKNOWN",
+            "bibliographic_consistency": "CONFLICT"
+            if identifier_metadata_conflict
+            else "PARTIAL"
+            if identifier_metadata_partial
+            else "CONSISTENT",
             "candidate_count": len(ranked),
             "candidate_margin": candidate_margin,
             "provider": best_candidate.provider,

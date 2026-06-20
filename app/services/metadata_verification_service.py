@@ -12,7 +12,7 @@ from app.models.metadata_record import MetadataRecord
 from app.models.processing_job import ProcessingJob
 from app.models.submission import Submission
 from app.processing.metadata.crossref_client import (
-    lookup_crossref_by_doi,
+    lookup_crossref_by_doi_result,
     search_crossref_by_title,
 )
 from app.processing.metadata.metadata_matcher import (
@@ -21,8 +21,9 @@ from app.processing.metadata.metadata_matcher import (
     normalize_doi,
     select_best_metadata_match,
 )
-from app.processing.metadata.openalex_client import search_openalex_by_title
+from app.processing.metadata.openalex_client import lookup_openalex_by_doi, search_openalex_by_title
 from app.processing.metadata.url_checker import check_url_exists
+from app.services.publication_status_service import evaluate_publication_status
 
 
 @dataclass
@@ -41,6 +42,10 @@ class ResolvedCitationMetadata:
     publisher: str | None
     source_type: str
     citation_count: int | None
+    publication_status: str
+    is_retracted: bool
+    retraction_sources: list[dict[str, Any]]
+    publication_status_warnings: list[str]
     source_url: str | None
     candidate_count: int
     candidate_margin: float | None
@@ -150,6 +155,10 @@ def _build_record_from_resolved_metadata(
             "publisher": resolved.publisher,
             "source_type": resolved.source_type,
             "citation_count": resolved.citation_count,
+            "publication_status": resolved.publication_status,
+            "is_retracted": resolved.is_retracted,
+            "retraction_sources": resolved.retraction_sources,
+            "publication_status_warnings": resolved.publication_status_warnings,
             "candidate_count": resolved.candidate_count,
             "candidate_margin": resolved.candidate_margin,
             "evidence": resolved.evidence,
@@ -252,14 +261,25 @@ def _build_record_from_url_fallback(
 
 def _find_academic_metadata_match(
     citation: Citation,
-) -> MetadataMatchResult | None:
+) -> tuple[MetadataMatchResult | None, dict[str, Any] | None]:
     candidates: list[MetadataCandidate] = []
 
     if citation.doi:
-        crossref_candidate = lookup_crossref_by_doi(citation.doi)
-
-        if crossref_candidate is not None:
-            candidates.append(crossref_candidate)
+        crossref_result = lookup_crossref_by_doi_result(citation.doi)
+        if crossref_result.status in {"UNAVAILABLE", "RATE_LIMITED", "INVALID_RESPONSE"}:
+            return None, {
+                "provider": crossref_result.provider,
+                "status": crossref_result.status,
+                "http_status": crossref_result.http_status,
+                "error_code": crossref_result.error_code,
+            }
+        if crossref_result.status == "NOT_FOUND":
+            return None, {"provider": crossref_result.provider, "status": "NOT_FOUND", "http_status": 404}
+        if crossref_result.data is not None:
+            candidates.append(crossref_result.data)
+        openalex_candidate = lookup_openalex_by_doi(citation.doi)
+        if openalex_candidate is not None:
+            candidates.append(openalex_candidate)
 
     if citation.title:
         candidates.extend(
@@ -275,12 +295,15 @@ def _find_academic_metadata_match(
             )
         )
 
-    return select_best_metadata_match(
-        citation_title=citation.title,
-        citation_authors=citation.authors,
-        citation_year=citation.year,
-        citation_doi=citation.doi,
-        candidates=candidates,
+    return (
+        select_best_metadata_match(
+            citation_title=citation.title,
+            citation_authors=citation.authors,
+            citation_year=citation.year,
+            citation_doi=citation.doi,
+            candidates=candidates,
+        ),
+        None,
     )
 
 
@@ -290,6 +313,7 @@ def _resolved_from_match(
 ) -> ResolvedCitationMetadata:
     raw_response = match_result.raw_response if isinstance(match_result.raw_response, dict) else {}
     abstract = raw_response.get("abstract") or raw_response.get("abstract_inverted_index")
+    publication_status = evaluate_publication_status(match_result.provider, raw_response)
 
     return ResolvedCitationMetadata(
         status=match_result.match_status,
@@ -306,6 +330,10 @@ def _resolved_from_match(
         publisher=match_result.publisher,
         source_type=match_result.source_type,
         citation_count=match_result.citation_signal,
+        publication_status=publication_status.publication_status.value,
+        is_retracted=publication_status.is_retracted,
+        retraction_sources=publication_status.retraction_sources,
+        publication_status_warnings=publication_status.warnings,
         source_url=match_result.source_url,
         candidate_count=match_result.candidate_count,
         candidate_margin=match_result.candidate_margin,
@@ -339,6 +367,10 @@ def _resolved_from_url_fallback(citation: Citation) -> ResolvedCitationMetadata:
             publisher=None,
             source_type="website",
             citation_count=None,
+            publication_status="UNKNOWN" if status_value == MetadataStatus.PROVIDER_UNAVAILABLE else "ACTIVE_OR_NO_SIGNAL",
+            is_retracted=False,
+            retraction_sources=[],
+            publication_status_warnings=["PUBLICATION_STATUS_PROVIDER_UNAVAILABLE"] if status_value == MetadataStatus.PROVIDER_UNAVAILABLE else [],
             source_url=url_check.final_url,
             candidate_count=0,
             candidate_margin=None,
@@ -371,6 +403,10 @@ def _resolved_from_url_fallback(citation: Citation) -> ResolvedCitationMetadata:
         publisher=None,
         source_type="unknown",
         citation_count=None,
+        publication_status="UNKNOWN",
+        is_retracted=False,
+        retraction_sources=[],
+        publication_status_warnings=[],
         source_url=None,
         candidate_count=0,
         candidate_margin=None,
@@ -396,6 +432,10 @@ def verify_citation_metadata(citation: Citation) -> ResolvedCitationMetadata:
             publisher=None,
             source_type="unknown",
             citation_count=None,
+            publication_status="UNKNOWN",
+            is_retracted=False,
+            retraction_sources=[],
+            publication_status_warnings=[],
             source_url=None,
             candidate_count=0,
             candidate_margin=None,
@@ -403,7 +443,66 @@ def verify_citation_metadata(citation: Citation) -> ResolvedCitationMetadata:
             raw_response={"invalid_doi": citation.doi},
         )
 
-    match_result = _find_academic_metadata_match(citation)
+    match_result, provider_error = _find_academic_metadata_match(citation)
+
+    if provider_error is not None and provider_error.get("status") in {"UNAVAILABLE", "RATE_LIMITED", "INVALID_RESPONSE"}:
+        return ResolvedCitationMetadata(
+            status=MetadataStatus.PROVIDER_UNAVAILABLE,
+            provider=str(provider_error.get("provider") or "Crossref"),
+            confidence_score=0.0,
+            query_type="doi" if citation.doi else "title_author_year",
+            query_value=normalize_doi(citation.doi) or citation.title,
+            matched_doi=None,
+            matched_title=citation.title,
+            matched_authors=citation.authors,
+            matched_year=citation.year,
+            abstract=None,
+            venue=None,
+            publisher=None,
+            source_type="unknown",
+            citation_count=None,
+            publication_status="UNKNOWN",
+            is_retracted=False,
+            retraction_sources=[],
+            publication_status_warnings=["PUBLICATION_STATUS_PROVIDER_UNAVAILABLE"],
+            source_url=None,
+            candidate_count=0,
+            candidate_margin=None,
+            evidence={
+                "provider_status": provider_error.get("status"),
+                "http_status": provider_error.get("http_status"),
+                "error_code": provider_error.get("error_code"),
+            },
+            raw_response={"provider_error": provider_error},
+            provider_error=str(provider_error.get("error_code") or provider_error.get("status")),
+        )
+
+    if provider_error is not None and provider_error.get("status") == "NOT_FOUND":
+        return ResolvedCitationMetadata(
+            status=MetadataStatus.NOT_FOUND,
+            provider=str(provider_error.get("provider") or "Crossref"),
+            confidence_score=0.0,
+            query_type="doi",
+            query_value=normalize_doi(citation.doi) or citation.doi,
+            matched_doi=None,
+            matched_title=None,
+            matched_authors=None,
+            matched_year=None,
+            abstract=None,
+            venue=None,
+            publisher=None,
+            source_type="unknown",
+            citation_count=None,
+            publication_status="ACTIVE_OR_NO_SIGNAL",
+            is_retracted=False,
+            retraction_sources=[],
+            publication_status_warnings=[],
+            source_url=None,
+            candidate_count=0,
+            candidate_margin=None,
+            evidence={"identifier_existence": "NOT_FOUND", "provider": provider_error.get("provider")},
+            raw_response={"provider_status": provider_error},
+        )
 
     if match_result is not None and match_result.match_status != MetadataStatus.NOT_FOUND:
         return _resolved_from_match(citation, match_result)

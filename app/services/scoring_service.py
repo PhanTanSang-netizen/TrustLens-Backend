@@ -9,6 +9,8 @@ from uuid import UUID
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
+from app.ai.relevance.relevance_service import ReferenceInput, score_reference_sync
+from app.core.config import settings
 from app.core.enums.metadata_status import MetadataStatus, normalize_metadata_status
 from app.core.trust_score_definition import DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, SCORING_VERSION
 from app.models.citation import Citation
@@ -25,11 +27,35 @@ class ComponentScore:
     reason: str
     evidence: dict[str, Any]
     confidence: float
+    raw_score: float | None = None
+    raw_max_score: float | None = None
+    weighted_score: float | None = None
+    weighted_max_score: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.raw_score is None:
+            self.raw_score = self.score
+        if self.raw_max_score is None:
+            self.raw_max_score = self.max_score
+        if self.weighted_score is None:
+            self.weighted_score = self.score
+        if self.weighted_max_score is None:
+            self.weighted_max_score = self.max_score
+
+    @property
+    def ratio(self) -> float:
+        raw_max = float(self.raw_max_score or 0)
+        if raw_max <= 0:
+            return 0.0
+        return float(self.raw_score or 0) / raw_max
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "score": round(self.score, 2),
-            "max_score": self.max_score,
+            "score": round(float(self.weighted_score or 0), 2),
+            "max_score": self.weighted_max_score,
+            "raw_score": round(float(self.raw_score or 0), 2),
+            "raw_max_score": self.raw_max_score,
+            "ratio": round(self.ratio, 4),
             "reason": self.reason,
             "evidence": self.evidence,
             "confidence": round(self.confidence, 3),
@@ -246,6 +272,7 @@ def _score_verification(metadata: MetadataRecord | None) -> ComponentScore:
         MetadataStatus.NOT_FOUND: 3,
         MetadataStatus.PROVIDER_UNAVAILABLE: 8,
         MetadataStatus.INVALID_IDENTIFIER: 0,
+        MetadataStatus.IDENTIFIER_METADATA_CONFLICT: 0,
     }
     raw = _metadata_raw(metadata)
     evidence = {
@@ -254,6 +281,7 @@ def _score_verification(metadata: MetadataRecord | None) -> ComponentScore:
         "title_similarity": raw.get("evidence", {}).get("title_similarity") if isinstance(raw.get("evidence"), dict) else None,
         "author_similarity": raw.get("evidence", {}).get("author_similarity") if isinstance(raw.get("evidence"), dict) else None,
         "year_similarity": raw.get("evidence", {}).get("year_similarity") if isinstance(raw.get("evidence"), dict) else None,
+        "year_difference": raw.get("evidence", {}).get("year_difference") if isinstance(raw.get("evidence"), dict) else None,
         "candidate_count": raw.get("candidate_count", 0),
         "candidate_margin": raw.get("candidate_margin"),
         "provider": metadata.provider if metadata is not None else "unknown",
@@ -304,9 +332,13 @@ def _score_credibility(
         if any(item in str(venue).lower() for item in venue_whitelist):
             venue_score += 2
 
-    publication_status = str(raw.get("publication_status") or "").lower()
-    if "retract" in publication_status or raw.get("is_retracted") is True:
+    publication_status = str(raw.get("publication_status") or "").upper()
+    if publication_status == "RETRACTED" or raw.get("is_retracted") is True:
         publication_status_score = 0
+    elif publication_status == "EXPRESSION_OF_CONCERN":
+        publication_status_score = 1
+    elif publication_status == "UNKNOWN":
+        publication_status_score = 1
     elif raw.get("publication_status") or raw.get("publication_status_verified"):
         publication_status_score = 3
     else:
@@ -326,6 +358,9 @@ def _score_credibility(
             "venue": venue,
             "venue_score": venue_score,
             "publication_status_score": publication_status_score,
+            "publication_status": raw.get("publication_status"),
+            "is_retracted": raw.get("is_retracted"),
+            "retraction_sources": raw.get("retraction_sources", []),
         },
         confidence=0.75 if status_value in {MetadataStatus.VERIFIED, MetadataStatus.PARTIAL_MATCH} else 0.45,
     )
@@ -336,8 +371,31 @@ def _score_relevance(
     metadata: MetadataRecord | None,
     report_text: str,
     thresholds: dict[str, Any],
+    report_context: dict[str, Any] | None = None,
 ) -> ComponentScore:
     reference_text, has_abstract = _reference_text(citation, metadata)
+    if settings.FEATURE_C4_V2:
+        raw = _metadata_raw(metadata)
+        keywords = raw.get("keywords")
+        result = score_reference_sync(
+            report_text=report_text,
+            report_context=report_context or {"body_text": report_text},
+            reference=ReferenceInput(
+                title=(metadata.matched_title if metadata is not None else None) or citation.title,
+                abstract=str(raw.get("abstract")) if raw.get("abstract") else None,
+                keywords=keywords if isinstance(keywords, (list, str)) else None,
+                venue=raw.get("venue"),
+                raw_citation=citation.raw_text,
+            ),
+        )
+        return ComponentScore(
+            score=result.score,
+            max_score=result.max_score,
+            reason=result.reason,
+            evidence=result.evidence,
+            confidence=result.confidence,
+        )
+
     semantic_similarity = _cosine_token_similarity(report_text, reference_text)
     lexical_similarity = _token_overlap(report_text, reference_text)
     raw_relevance = semantic_similarity * 0.70 + lexical_similarity * 0.30
@@ -365,6 +423,7 @@ def _score_relevance(
             "semantic_similarity": round(semantic_similarity, 4),
             "lexical_similarity": round(lexical_similarity, 4),
             "model": "lexical-tfidf-fallback",
+            "threshold_profile": "lexical-tfidf-fallback-c4-v1",
             "has_abstract": has_abstract,
         },
         confidence=0.75 if has_abstract else 0.5,
@@ -500,16 +559,22 @@ def _apply_component_weights(
     weighted: dict[str, ComponentScore] = {}
     for component_key, component in components.items():
         target_max = float(weights[weight_keys[component_key]])
-        if component.max_score <= 0:
+        raw_max = float(component.raw_max_score or component.max_score)
+        raw_score = float(component.raw_score or component.score)
+        if raw_max <= 0:
             scaled_score = 0.0
         else:
-            scaled_score = component.score / component.max_score * target_max
+            scaled_score = raw_score / raw_max * target_max
         weighted[component_key] = ComponentScore(
             score=round(scaled_score, 2),
             max_score=target_max,
             reason=component.reason,
             evidence={**component.evidence, "configured_weight": target_max},
             confidence=component.confidence,
+            raw_score=raw_score,
+            raw_max_score=raw_max,
+            weighted_score=round(scaled_score, 2),
+            weighted_max_score=target_max,
         )
     return weighted
 
@@ -528,16 +593,52 @@ def _evaluate_penalties(
         penalties.append({"code": "INVALID_IDENTIFIER", "value": 10, "label_cap": "high_risk", "evidence": {"doi": citation.doi}})
 
     evidence = raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {}
-    if citation.doi and evidence.get("doi_exact_match") is False and raw.get("matched_doi"):
+    if status_value == MetadataStatus.IDENTIFIER_METADATA_CONFLICT:
+        penalties.append(
+            {
+                "code": "IDENTIFIER_METADATA_CONFLICT",
+                "value": 15,
+                "label_cap": "high_risk",
+                "evidence": {
+                    "citation_doi": citation.doi,
+                    "matched_doi": raw.get("matched_doi"),
+                    "doi_exact_match": evidence.get("doi_exact_match"),
+                    "title_similarity": evidence.get("title_similarity"),
+                    "author_similarity": evidence.get("author_similarity"),
+                    "year_difference": evidence.get("year_difference"),
+                    "decision": MetadataStatus.IDENTIFIER_METADATA_CONFLICT.value,
+                },
+            }
+        )
+    elif citation.doi and evidence.get("doi_exact_match") is False and raw.get("matched_doi"):
         penalties.append({"code": "DOI_CONFLICT", "value": 15, "label_cap": "high_risk", "evidence": {"citation_doi": citation.doi, "matched_doi": raw.get("matched_doi")}})
 
     if duplicate_of is not None:
         penalties.append({"code": "DUPLICATE_REFERENCE", "value": 5, "label_cap": "needs_review", "evidence": {"duplicate_of": str(duplicate_of)}})
 
-    if "retract" in str(raw.get("publication_status") or "").lower() or raw.get("is_retracted") is True:
-        penalties.append({"code": "RETRACTED_SOURCE", "value": 30, "label_cap": "high_risk", "evidence": {"publication_status": raw.get("publication_status")}})
+    if str(raw.get("publication_status") or "").upper() == "RETRACTED" or raw.get("is_retracted") is True:
+        penalties.append(
+            {
+                "code": "RETRACTED_SOURCE",
+                "value": 30,
+                "label_cap": "high_risk",
+                "evidence": {
+                    "publication_status": raw.get("publication_status"),
+                    "retraction_sources": raw.get("retraction_sources", []),
+                },
+            }
+        )
+    elif str(raw.get("publication_status") or "").upper() == "EXPRESSION_OF_CONCERN":
+        penalties.append(
+            {
+                "code": "EXPRESSION_OF_CONCERN",
+                "value": 10,
+                "label_cap": "needs_review",
+                "evidence": {"publication_status": raw.get("publication_status")},
+            }
+        )
 
-    if components["c4"].score <= 3:
+    if components["c4"].confidence >= 0.50 and components["c4"].ratio <= 0.15:
         penalties.append({"code": "LOW_RELEVANCE", "value": 3, "label_cap": "needs_review", "evidence": components["c4"].evidence})
 
     return penalties
@@ -564,11 +665,24 @@ def _warnings_for_reference(
         warnings.append(_warning("URL_ONLY", "medium", "Only the URL could be checked; academic metadata was not verified.", "Prefer sources with DOI or verifiable academic metadata.", components["c2"].evidence))
     elif status_value == MetadataStatus.INVALID_IDENTIFIER:
         warnings.append(_warning("INVALID_IDENTIFIER", "high", "Citation has an invalid identifier.", "Correct the DOI or remove the invalid identifier.", {"doi": citation.doi}))
+    elif status_value == MetadataStatus.IDENTIFIER_METADATA_CONFLICT:
+        warnings.append(_warning("IDENTIFIER_METADATA_CONFLICT", "high", "DOI exists but citation metadata conflicts with provider metadata.", "Correct the citation title/authors/year or replace the source.", components["c2"].evidence))
 
-    if components["c3"].score <= 8:
+    raw = _metadata_raw(metadata)
+    publication_status = str(raw.get("publication_status") or "").upper()
+    if publication_status == "RETRACTED" or raw.get("is_retracted") is True:
+        warnings.append(_warning("RETRACTED_SOURCE", "critical", "Source has a retraction signal from metadata providers.", "Replace this source or justify its use manually.", {"publication_status": raw.get("publication_status"), "retraction_sources": raw.get("retraction_sources", [])}))
+    elif publication_status == "EXPRESSION_OF_CONCERN":
+        warnings.append(_warning("EXPRESSION_OF_CONCERN", "high", "Source has an expression-of-concern signal.", "Review the source before relying on it.", {"publication_status": raw.get("publication_status")}))
+    if "PUBLICATION_STATUS_CONFLICT" in raw.get("publication_status_warnings", []):
+        warnings.append(_warning("PUBLICATION_STATUS_CONFLICT", "high", "Metadata providers disagree on publication status.", "Verify publication status manually.", {"publication_status_warnings": raw.get("publication_status_warnings", [])}))
+
+    if components["c3"].ratio <= 0.40:
         warnings.append(_warning("LOW_CREDIBILITY_SOURCE", "medium", "Source has limited credibility evidence.", "Prefer academic, institutional, or well documented sources.", components["c3"].evidence))
 
-    if components["c4"].score <= 7:
+    if components["c4"].confidence < 0.50:
+        warnings.append(_warning("RELEVANCE_EVIDENCE_INSUFFICIENT", "medium", "Relevance evidence is too weak for an automatic low-relevance penalty.", "Review the source relevance manually.", components["c4"].evidence))
+    elif components["c4"].ratio <= 0.35:
         warnings.append(_warning("LOW_RELEVANCE", "medium", "Citation appears weakly related to the report context.", "Check whether this source supports the report topic.", components["c4"].evidence))
 
     if components["c5"].evidence.get("age", 0) and components["c5"].evidence["age"] > 10:
@@ -577,7 +691,7 @@ def _warnings_for_reference(
     if citation.year and metadata is not None and metadata.matched_year and citation.year != metadata.matched_year:
         warnings.append(_warning("YEAR_CONFLICT", "medium", "Parsed year differs from matched metadata year.", "Review the citation year.", {"parsed_year": citation.year, "matched_year": metadata.matched_year}))
 
-    if components["c6"].score < 10:
+    if components["c6"].ratio < 1:
         warnings.append(_warning("STYLE_REVIEW", "low", components["c6"].reason, "Normalize citation style for the assignment.", components["c6"].evidence))
 
     for penalty in penalties:
@@ -638,7 +752,7 @@ def score_submission(
             "c1": _score_completeness(citation, metadata, source_type),
             "c2": _score_verification(metadata),
             "c3": _score_credibility(metadata, source_type, thresholds),
-            "c4": _score_relevance(citation, metadata, report_text, thresholds),
+            "c4": _score_relevance(citation, metadata, report_text, thresholds, report_context),
             "c5": _score_recency(citation, metadata, thresholds),
             "c6": _score_style(citation, expected_style),
             "c7": _score_duplicate(citation, source_type, duplicate_of, source_counter[source_type], len(citations)),
@@ -752,6 +866,7 @@ def score_submission(
             "provider_unavailable": len([r for r in metadata_records if normalize_metadata_status(r.verification_status) == MetadataStatus.PROVIDER_UNAVAILABLE]),
             "url_only": len([r for r in metadata_records if normalize_metadata_status(r.verification_status) == MetadataStatus.URL_ONLY]),
             "invalid_identifier": len([r for r in metadata_records if normalize_metadata_status(r.verification_status) == MetadataStatus.INVALID_IDENTIFIER]),
+            "identifier_metadata_conflict": len([r for r in metadata_records if normalize_metadata_status(r.verification_status) == MetadataStatus.IDENTIFIER_METADATA_CONFLICT]),
             "critical_warnings": len([w for w in all_warnings if w["severity"] == "critical"]),
             "high_warnings": len([w for w in all_warnings if w["severity"] == "high"]),
             "medium_warnings": len([w for w in all_warnings if w["severity"] == "medium"]),

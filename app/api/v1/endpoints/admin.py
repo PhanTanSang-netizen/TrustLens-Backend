@@ -3,7 +3,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
+from app.ai.embeddings.factory import create_embedding_provider
+from app.ai.relevance.relevance_service import ReferenceInput, RelevanceService
 from app.api.deps import require_permissions
+from app.core.config import settings
 from app.core.permissions import (
     ADMIN_AUDIT_LOG,
     ADMIN_METADATA_PROVIDER,
@@ -24,6 +27,55 @@ from app.services.admin_service import (
 
 
 router = APIRouter()
+
+
+@router.get("/system/ai-health")
+async def ai_health(
+    current_user=Depends(require_permissions(ADMIN_METADATA_PROVIDER)),
+):
+    del current_user
+    primary = create_embedding_provider(settings.RELEVANCE_PROVIDER)
+    fallback = create_embedding_provider(settings.RELEVANCE_FALLBACK_PROVIDER)
+    probe = "TrustLens technical health probe for embedding availability."
+    primary_result = await primary.embed_query(probe)
+    fallback_result = await fallback.embed_query(probe)
+    return {
+        "primary_provider": settings.RELEVANCE_PROVIDER,
+        "primary_status": "available" if primary_result.status == "SUCCESS" else "unavailable",
+        "primary_error_code": primary_result.error_code,
+        "fallback_provider": settings.RELEVANCE_FALLBACK_PROVIDER,
+        "fallback_status": "available" if fallback_result.status == "SUCCESS" else "unavailable",
+        "fallback_error_code": fallback_result.error_code,
+        "model_id": primary_result.model_id,
+        "prompt_version": settings.RELEVANCE_PROMPT_VERSION,
+    }
+
+
+@router.post("/relevance/diagnose")
+async def diagnose_relevance(
+    payload: dict,
+    current_user=Depends(require_permissions(ADMIN_METADATA_PROVIDER)),
+):
+    del current_user
+    service = RelevanceService()
+    result = await service.score_reference(
+        report_text=str(payload.get("report_text") or ""),
+        report_context={"body_text": str(payload.get("report_text") or "")},
+        reference=ReferenceInput(
+            title=payload.get("reference_title"),
+            abstract=payload.get("reference_abstract"),
+            keywords=payload.get("reference_keywords"),
+            venue=payload.get("reference_venue"),
+            raw_citation=payload.get("raw_citation"),
+        ),
+    )
+    return {
+        "score": result.score,
+        "max_score": result.max_score,
+        "confidence": result.confidence,
+        "reason": result.reason,
+        "evidence": result.evidence,
+    }
 
 
 @router.get("/audit-logs")

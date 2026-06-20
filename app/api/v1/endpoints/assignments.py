@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_permissions
 from app.core.permissions import ASSIGNMENT_MANAGE
 from app.db.session import get_db
-from app.schemas.assignment_schema import AssignmentCreate, AssignmentRead
+from app.schemas.assignment_schema import AssignmentCreate, AssignmentRead, AssignmentUpdate
 from app.services.assignment_service import (
     create_assignment,
+    get_assignment_by_id,
     get_assignment_by_class_and_title,
     get_assignments,
     get_class_by_id,
+    update_assignment,
 )
 from app.services.access_control_service import ensure_class_access
 
@@ -158,4 +160,57 @@ def list_assignments_endpoint(
         db=db,
         class_id=class_id,
         lecturer_id=current_user.id,
+    )
+
+
+@router.patch("/{assignment_id}", response_model=AssignmentRead)
+def update_assignment_endpoint(
+    assignment_id: UUID,
+    payload: AssignmentUpdate,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_permissions(ASSIGNMENT_MANAGE)),
+):
+    assignment = get_assignment_by_id(
+        db=db,
+        assignment_id=assignment_id,
+    )
+
+    if assignment is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "ASSIGNMENT_NOT_FOUND",
+                "message": "Khong tim thay bai nop.",
+                "details": {
+                    "assignment_id": str(assignment_id),
+                },
+            },
+        )
+
+    classroom = get_class_by_id(
+        db=db,
+        class_id=assignment.class_id,
+    )
+
+    if classroom is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error_code": "CLASS_NOT_FOUND",
+                "message": "Khong tim thay lop hoc phan.",
+                "details": {
+                    "class_id": str(assignment.class_id),
+                },
+            },
+        )
+
+    ensure_class_owner_or_admin(
+        classroom=classroom,
+        current_user=current_user,
+    )
+
+    return update_assignment(
+        db=db,
+        assignment=assignment,
+        payload=payload,
     )
